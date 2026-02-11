@@ -275,34 +275,43 @@ button:hover {
 
 .excuse-text {
     background: rgba(0, 0, 0, 0.3);
-    padding: 10px;
+    padding: 8px 10px;
     border-radius: 8px;
     font-style: italic;
-    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.excuse-body {
+    flex: 1;
+    word-break: break-all;
+    font-size: 0.95em;
 }
 
 .like-button {
-    position: absolute;
-    right: 10px;
-    top: 50%;
-    transform: translateY(-50%);
+    flex-shrink: 0;
     background: rgba(255, 255, 255, 0.2);
     border: none;
-    padding: 5px 10px;
+    padding: 4px 10px;
     border-radius: 15px;
     cursor: pointer;
     font-size: 0.9em;
-    transition: all 0.2s;
+    transition: background 0.2s;
+    white-space: nowrap;
+    width: auto;
 }
 
 .like-button:hover {
     background: rgba(255, 0, 0, 0.3);
-    transform: translateY(-50%) scale(1.1);
 }
 
-.like-count {
-    margin-left: 5px;
-    font-weight: bold;
+.like-count-display {
+    flex-shrink: 0;
+    font-size: 0.9em;
+    opacity: 0.8;
+    white-space: nowrap;
 }
 
 .player-actions {
@@ -431,17 +440,13 @@ button:hover {
     font-weight: bold;
 }
 
-/* 플레이어 크기 애니메이션 (좋아요 수에 따라) */
-.player-card[data-likes="1"] { transform: scale(1.05); }
-.player-card[data-likes="2"] { transform: scale(1.08); }
-.player-card[data-likes="3"] { transform: scale(1.11); }
-.player-card[data-likes="4"] { transform: scale(1.14); }
-.player-card[data-likes="5"] { transform: scale(1.17); }
-.player-card[data-likes="6"] { transform: scale(1.20); }
-.player-card[data-likes="7"] { transform: scale(1.23); }
-.player-card[data-likes="8"] { transform: scale(1.26); }
-.player-card[data-likes="9"] { transform: scale(1.29); }
-.player-card[data-likes="10"] { transform: scale(1.32); z-index: 10; }
+/* 채팅창 선택지 표시 */
+.chat-player-choice {
+    font-size: 0.85em;
+    opacity: 0.7;
+    display: block;
+    margin-top: 3px;
+}
 
 /* 스크롤바 스타일 */
 ::-webkit-scrollbar {
@@ -477,15 +482,54 @@ button:hover {
     }
 }
 
-/* 변명 입력창 */
+/* 변명 입력 영역 (오른쪽 패널 하단) */
+.excuse-area {
+    padding: 12px 15px;
+    background: rgba(255, 200, 0, 0.1);
+    border-top: 2px solid rgba(255, 200, 0, 0.3);
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
 .excuse-input {
-    width: 100%;
+    flex: 1;
     padding: 10px;
-    margin-top: 10px;
+    margin-bottom: 0;
     background: rgba(255, 255, 255, 0.9);
     border: none;
     border-radius: 8px;
     color: #333;
+    font-size: 0.95em;
+}
+
+.excuse-submit-btn {
+    width: auto;
+    padding: 10px 16px;
+    font-size: 0.95em;
+    background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%);
+    color: #000;
+}
+
+.excuse-submitted {
+    font-style: italic;
+    opacity: 0.85;
+    font-size: 0.9em;
+    padding: 6px 0;
+}
+
+/* 판결 버튼 영역 */
+.judgement-buttons {
+    display: flex;
+    gap: 10px;
+    padding: 10px 15px;
+    background: rgba(255, 255, 255, 0.05);
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.judgement-buttons button {
+    flex: 1;
+    padding: 10px;
 }
 
 /* 알림 메시지 */

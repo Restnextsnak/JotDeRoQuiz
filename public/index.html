@@ -75,14 +75,18 @@
         });
         
         socket.on('room_created', (data) => {
+            const name = document.getElementById('hostName').value.trim();
             localStorage.setItem('roomId', data.roomId);
             localStorage.setItem('role', data.role);
+            localStorage.setItem('playerName', name);
             window.location.href = '/game.html';
         });
-        
+
         socket.on('joined_room', (data) => {
+            const name = document.getElementById('playerName').value.trim();
             localStorage.setItem('roomId', data.roomId);
             localStorage.setItem('role', data.role);
+            localStorage.setItem('playerName', name);
             window.location.href = '/game.html';
         });
         

@@ -8,7 +8,7 @@
 </head>
 <body>
     <div class="game-container">
-        <!-- 왼쪽: 개인 채팅방 (1.5) -->
+        <!-- 왼쪽: 1:1 채팅방 (1.5) -->
         <div class="left-panel">
             <div class="chat-header">
                 <h3>1:1 채팅</h3>
@@ -21,7 +21,7 @@
             </div>
         </div>
 
-        <!-- 중앙: 플레이어 목록 (7) -->
+        <!-- 중앙: 방장 + 플레이어 목록 (7) -->
         <div class="center-panel">
             <div class="game-header">
                 <h2>JotDeRo Quiz</h2>
@@ -56,6 +56,7 @@
                 <div id="questionText" class="question-text">대기 중...</div>
                 <div id="optionsArea" class="options-area"></div>
             </div>
+            <div id="excuseArea" class="excuse-area" style="display: none;"></div>
             <div class="timer-area">
                 <div id="timerText"></div>
             </div>
@@ -63,6 +64,6 @@
     </div>
 
     <script src="/socket.io/socket.io.js"></script>
-    <script src="/js/game.js"></script>
+    <script src="/game.js"></script>
 </body>
 </html>

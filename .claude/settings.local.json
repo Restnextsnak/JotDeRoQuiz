@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(del \"C:\\\\JotDeRoQuiz\\\\public\\\\js\\\\game.html\")",
+      "Bash(netstat:*)",
+      "Bash(taskkill:*)",
+      "Bash(cmd.exe /c \"taskkill /PID 18676 /F\")",
+      "Bash(cmd.exe /c \"taskkill /PID 18676 /F 2>&1\")",
+      "Bash(cmd.exe:*)",
+      "Bash(powershell.exe -Command \"Stop-Process -Id 18676 -Force\")"
+    ]
+  }
+}
