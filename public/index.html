@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JotDeRo Quiz - 로비</title>
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+    <div class="lobby-container">
+        <h1>JotDeRo Quiz</h1>
+        <p class="subtitle">모두가 라이어인 역추리 퀴즈쇼</p>
+        
+        <div class="lobby-buttons">
+            <div class="section">
+                <h2>방 만들기</h2>
+                <input type="text" id="hostName" placeholder="닉네임 입력" maxlength="10">
+                <button id="createRoomBtn">방 생성</button>
+            </div>
+            
+            <div class="section">
+                <h2>방 참가하기</h2>
+                <input type="text" id="playerName" placeholder="닉네임 입력" maxlength="10">
+                <input type="text" id="roomCode" placeholder="방 코드 입력" maxlength="6" style="text-transform: uppercase;">
+                <div class="role-select">
+                    <label>
+                        <input type="radio" name="role" value="player" checked>
+                        플레이어
+                    </label>
+                    <label>
+                        <input type="radio" name="role" value="spectator">
+                        관전자
+                    </label>
+                </div>
+                <button id="joinRoomBtn">참가</button>
+            </div>
+        </div>
+        
+        <div class="rules">
+            <h3>게임 규칙</h3>
+            <ul>
+                <li>문제 없이 4개의 선택지만 보고 정답을 골라야 합니다</li>
+                <li>모두 선택 후 문제가 공개되고 방장이 정답을 지정합니다</li>
+                <li>오답자는 20자 이내 변명을 작성합니다</li>
+                <li>방장이 1:1 채팅으로 심문 후 구제 여부를 결정합니다</li>
+                <li>최후의 1인이 남을 때까지 계속됩니다</li>
+            </ul>
+        </div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io();
+        
+        document.getElementById('createRoomBtn').addEventListener('click', () => {
+            const name = document.getElementById('hostName').value.trim();
+            if (!name) {
+                alert('닉네임을 입력해주세요');
+                return;
+            }
+            socket.emit('create_room', { name });
+        });
+        
+        document.getElementById('joinRoomBtn').addEventListener('click', () => {
+            const name = document.getElementById('playerName').value.trim();
+            const roomId = document.getElementById('roomCode').value.trim().toUpperCase();
+            const role = document.querySelector('input[name="role"]:checked').value;
+            
+            if (!name || !roomId) {
+                alert('닉네임과 방 코드를 입력해주세요');
+                return;
+            }
+            
+            socket.emit('join_room', { name, roomId, role });
+        });
+        
+        socket.on('room_created', (data) => {
+            localStorage.setItem('roomId', data.roomId);
+            localStorage.setItem('role', data.role);
+            window.location.href = '/game.html';
+        });
+        
+        socket.on('joined_room', (data) => {
+            localStorage.setItem('roomId', data.roomId);
+            localStorage.setItem('role', data.role);
+            window.location.href = '/game.html';
+        });
+        
+        socket.on('error', (data) => {
+            alert(data.message);
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JotDeRo Quiz - Game</title>
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+    <div class="game-container">
+        <!-- 왼쪽: 개인 채팅방 (1.5) -->
+        <div class="left-panel">
+            <div class="chat-header">
+                <h3>1:1 채팅</h3>
+                <div id="chatPlayerName"></div>
+            </div>
+            <div class="chat-messages" id="chatMessages"></div>
+            <div class="chat-input-area" id="chatInputArea" style="display: none;">
+                <input type="text" id="chatInput" placeholder="메시지 입력..." maxlength="100">
+                <button id="sendChatBtn">전송</button>
+            </div>
+        </div>
+
+        <!-- 중앙: 플레이어 목록 (7) -->
+        <div class="center-panel">
+            <div class="game-header">
+                <h2>JotDeRo Quiz</h2>
+                <div class="room-info">
+                    <span id="roomCode">방 코드: </span>
+                    <span id="roundInfo">라운드: 1</span>
+                    <span id="phaseInfo">대기 중</span>
+                </div>
+            </div>
+
+            <!-- 방장 영역 -->
+            <div class="host-area" id="hostArea">
+                <div class="player-card host-card" id="hostCard">
+                    <div class="player-name">방장</div>
+                </div>
+                <div class="host-controls" id="hostControls" style="display: none;">
+                    <button id="startGameBtn" class="host-btn">게임 시작</button>
+                    <button id="nextRoundBtn" class="host-btn" style="display: none;">다음 라운드</button>
+                </div>
+            </div>
+
+            <!-- 플레이어 목록 -->
+            <div class="players-area" id="playersArea"></div>
+        </div>
+
+        <!-- 오른쪽: 문제/선택지 (1.5) -->
+        <div class="right-panel">
+            <div class="question-header">
+                <h3>문제</h3>
+            </div>
+            <div class="question-area">
+                <div id="questionText" class="question-text">대기 중...</div>
+                <div id="optionsArea" class="options-area"></div>
+            </div>
+            <div class="timer-area">
+                <div id="timerText"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="/js/game.js"></script>
+</body>
+</html>
