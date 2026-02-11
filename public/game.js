@@ -54,6 +54,7 @@ socket.on('connect', () => {
 
 // 방 상태 업데이트
 socket.on('room_state', (state) => {
+    // 서버에서 받은 players에는 rescued 필드가 포함됨 — 그대로 사용
     gameState.players          = state.players;
     gameState.phase            = state.phase;
     gameState.round            = state.round;
@@ -70,6 +71,14 @@ socket.on('round_started', (data) => {
     gameState.myAnswer       = null;
     gameState.correctAnswer  = null;
 
+    // 로컬 플레이어 상태 즉시 초기화 (room_state 도착 전 UI가 깨끗하게 보이도록)
+    gameState.players.forEach(p => {
+        p.answer  = null;
+        p.excuse  = '';
+        p.likes   = 0;
+        p.rescued = false;
+    });
+
     roundInfoEl.textContent  = `라운드: ${data.round}`;
     phaseInfoEl.textContent  = '선택 중';
     questionTextEl.textContent = myRole === 'host' ? '플레이어들이 선택 중...' : '???';
@@ -78,8 +87,9 @@ socket.on('round_started', (data) => {
     excuseAreaEl.style.display = 'none';
     excuseAreaEl.innerHTML     = '';
 
+    updateUI();
     renderOptions(data.options);
-    startTimer(20);
+    startTimer(10);
 });
 
 // 모두 답변 완료 → 문제 공개
@@ -138,30 +148,38 @@ socket.on('chat_message', (data) => {
     appendChatMessage(data);
 });
 
-// 플레이어 구제 → 해당 플레이어 카드 액션 버튼 즉시 제거
+// 플레이어 구제 (room_state가 먼저 도착해 gameState.players가 이미 갱신된 상태)
 socket.on('player_rescued', (data) => {
     showNotification(`${data.playerName}님이 구제되었습니다!`, 'success');
     closeChatPanel();
-    removePlayerActions(data.playerId);
-    // 구제된 플레이어를 정답자처럼 표시 (버튼 숨김용 플래그)
-    const p = gameState.players.find(pl => pl.id === data.playerId);
-    if (p) p._rescued = true;
+    // room_state로 이미 rescued:true 가 반영됐으므로 updateUI만 호출
+    updateUI();
 });
 
 // 플레이어 탈락
 socket.on('player_eliminated', (data) => {
     showNotification(`${data.playerName}님이 탈락했습니다!`, 'error');
     closeChatPanel();
-    removePlayerActions(data.playerId);
+    // room_state로 이미 eliminated:true 가 반영됐으므로 updateUI만 호출
+    updateUI();
 });
 
 // 게임 종료
 socket.on('game_finished', (data) => {
     stopTimer();
+    gameState.phase         = 'finished';
+    gameState.correctAnswer = null;
     phaseInfoEl.textContent = '게임 종료';
+
+    // 변명 입력창 숨기기
+    excuseAreaEl.style.display = 'none';
+    excuseAreaEl.innerHTML     = '';
+
     if (data.winner) {
+        questionTextEl.textContent = `🎉 우승: ${data.winner.name} 🎉`;
         showNotification(`🎉 ${data.winner.name}님이 우승했습니다! 🎉`, 'success');
     } else {
+        questionTextEl.textContent = '게임 종료';
         showNotification('게임이 종료되었습니다', 'info');
     }
 
@@ -169,6 +187,8 @@ socket.on('game_finished', (data) => {
         startGameBtn.style.display = 'block';
         nextRoundBtn.style.display = 'none';
     }
+
+    updateUI();
 });
 
 socket.on('host_left', () => {
@@ -245,17 +265,23 @@ function createPlayerCard(player) {
         html += buildExcuseHtml(player, canLike);
     }
 
-    // 방장 전용 액션 버튼: 변명/채팅 단계, 미탈락, 미구제 플레이어
+    // 방장 전용 액션 버튼: 변명/채팅 단계, 미탈락, 미구제 오답자만
     if (myRole === 'host' &&
         (gameState.phase === 'excuse' || gameState.phase === 'chat') &&
         !player.eliminated &&
-        !player._rescued &&
-        player.role === 'player') {
-        html += `
-            <div class="player-actions" id="actions-${player.id}">
-                <button class="btn-chat" onclick="startChat('${player.id}')">대화하기</button>
-                <button class="btn-eliminate" onclick="eliminatePlayer('${player.id}')">즉시 탈락</button>
-            </div>`;
+        !player.rescued &&
+        player.role === 'player' &&
+        player.answer !== null) {
+        // 정답자에게는 버튼 표시 안 함 (정답자는 rescue 불필요)
+        // correctAnswer가 아직 null이면 (변명 단계 시작 직후) 오답자 모두 표시
+        const isCorrect = gameState.correctAnswer !== null && player.answer === gameState.correctAnswer;
+        if (!isCorrect) {
+            html += `
+                <div class="player-actions" id="actions-${player.id}">
+                    <button class="btn-chat" onclick="startChat('${player.id}')">대화하기</button>
+                    <button class="btn-eliminate" onclick="eliminatePlayer('${player.id}')">즉시 탈락</button>
+                </div>`;
+        }
     }
 
     card.innerHTML = html;
@@ -366,7 +392,7 @@ function showChatPanel(playerId, playerName) {
 
     chatPlayerNameEl.innerHTML =
         `<strong>${playerName}</strong>님과 대화 중<br>
-         <span class="chat-player-choice">선택: ${optionText}</span>`;
+         <span class="chat-player-choice">🎯 선택: ${optionText}</span>`;
 
     // 채팅 기록 복원
     chatMessagesEl.innerHTML = '';
@@ -429,15 +455,6 @@ function addJudgementButtons(playerId) {
     div.appendChild(rescueBtn);
     div.appendChild(elimBtn);
     document.querySelector('.left-panel').insertBefore(div, chatInputAreaEl);
-}
-
-// 액션 버튼만 제거 (카드는 유지)
-function removePlayerActions(playerId) {
-    const actionsEl = document.getElementById(`actions-${playerId}`);
-    if (actionsEl) actionsEl.remove();
-    // gameState에도 _rescued 플래그 (구제 시 updateUI에서 버튼 안 생기도록)
-    const p = gameState.players.find(pl => pl.id === playerId);
-    if (p) p._rescued = true;
 }
 
 // ── 기타 액션 ─────────────────────────────────────────────

@@ -442,10 +442,15 @@ button:hover {
 
 /* 채팅창 선택지 표시 */
 .chat-player-choice {
-    font-size: 0.85em;
-    opacity: 0.7;
-    display: block;
-    margin-top: 3px;
+    display: inline-block;
+    margin-top: 6px;
+    padding: 4px 10px;
+    background: #2a2a4a;
+    border: 1px solid #7c6af7;
+    border-radius: 6px;
+    font-size: 0.9em;
+    color: #c8bfff;
+    font-weight: 600;
 }
 
 /* 스크롤바 스타일 */

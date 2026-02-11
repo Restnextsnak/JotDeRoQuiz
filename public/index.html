@@ -83,10 +83,9 @@
         });
 
         socket.on('joined_room', (data) => {
-            const name = document.getElementById('playerName').value.trim();
             localStorage.setItem('roomId', data.roomId);
             localStorage.setItem('role', data.role);
-            localStorage.setItem('playerName', name);
+            localStorage.setItem('playerName', data.name); // 서버가 확정한 고유 이름 사용
             window.location.href = '/game.html';
         });
         

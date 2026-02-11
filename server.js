@@ -42,8 +42,28 @@ function createRoom(roomId, hostId, hostName) {
     excuses: new Map(),
     currentChatPlayer: null,
     usedQuestions: new Set(),
-    rescuedPlayers: new Set()
+    rescuedPlayers: new Set(),
+    phaseTimer: null   // 단계별 서버 타임아웃
   });
+}
+
+// 방의 진행 타이머를 설정 (기존 타이머 있으면 취소 후 교체)
+function setPhaseTimer(roomId, ms, callback) {
+  const room = rooms.get(roomId);
+  if (!room) return;
+  if (room.phaseTimer) clearTimeout(room.phaseTimer);
+  room.phaseTimer = setTimeout(() => {
+    room.phaseTimer = null;
+    callback();
+  }, ms);
+}
+
+function clearPhaseTimer(roomId) {
+  const room = rooms.get(roomId);
+  if (room && room.phaseTimer) {
+    clearTimeout(room.phaseTimer);
+    room.phaseTimer = null;
+  }
 }
 
 function getRandomQuestion(room) {
@@ -66,6 +86,7 @@ function checkAllPlayersAnswered(roomId) {
   const answeredCount = alivePlayers.filter(p => p.answer !== null).length;
 
   if (alivePlayers.length > 0 && answeredCount === alivePlayers.length) {
+    clearPhaseTimer(roomId);
     room.phase = 'question_reveal';
     io.to(roomId).emit('all_answered', {
       question: room.currentQuestion.question,
@@ -73,6 +94,48 @@ function checkAllPlayersAnswered(roomId) {
     });
     console.log(`All players answered in room ${roomId}, revealing question`);
   }
+}
+
+// 선택 시간 초과: 미답변 플레이어에게 랜덤 답변 배정 후 진행
+function forceAnswerTimeout(roomId) {
+  const room = rooms.get(roomId);
+  if (!room || room.phase !== 'selecting') return;
+
+  const optionCount = room.currentQuestion.options.length;
+  room.players.forEach((player, id) => {
+    if (!player.eliminated && player.role === 'player' && player.answer === null) {
+      const random = Math.floor(Math.random() * optionCount);
+      player.answer = random;
+      room.answers.set(id, random);
+    }
+  });
+
+  broadcastRoomState(roomId);
+  room.phase = 'question_reveal';
+  io.to(roomId).emit('all_answered', {
+    question: room.currentQuestion.question,
+    phase: 'question_reveal'
+  });
+  console.log(`Answer timeout in room ${roomId}, forced random answers`);
+}
+
+// 변명 시간 초과: 미제출자 빈 변명으로 처리 (UI는 이미 클라이언트 타이머로 표시됨)
+function forceExcuseTimeout(roomId) {
+  const room = rooms.get(roomId);
+  if (!room || room.phase !== 'excuse') return;
+  // 변명 미제출 오답자에게 빈 변명 배정
+  room.players.forEach((player) => {
+    if (
+      !player.eliminated &&
+      player.role === 'player' &&
+      player.answer !== room.currentQuestion.correctAnswer &&
+      !player.excuse
+    ) {
+      player.excuse = '(변명 없음)';
+    }
+  });
+  broadcastRoomState(roomId);
+  console.log(`Excuse timeout in room ${roomId}`);
 }
 
 io.on('connection', (socket) => {
@@ -107,6 +170,11 @@ io.on('connection', (socket) => {
       return;
     }
 
+    if (room.players.size >= 30) {
+      socket.emit('error', { message: '방이 가득 찼습니다. (최대 30명)' });
+      return;
+    }
+
     const role = data.role || 'player';
     const uniqueName = getUniqueName(room, data.name);
 
@@ -133,25 +201,32 @@ io.on('connection', (socket) => {
     if (!room || room.host !== socket.id) return;
 
     const question = getRandomQuestion(room);
-    room.currentQuestion = question;
+    room.currentQuestion = { id: question.id, question: question.question, options: question.options, correctAnswer: null };
     room.usedQuestions.add(question.id);
     room.phase = 'selecting';
     room.answers.clear();
     room.excuses.clear();
     room.rescuedPlayers.clear();
 
-    // 플레이어 답변/변명 초기화
+    // 플레이어 전체 상태 초기화 (재시작 포함)
     room.players.forEach(player => {
       player.answer = null;
       player.excuse = '';
       player.likes = 0;
+      player.eliminated = false;
     });
+
+    // 라운드 초기화
+    room.currentRound = 1;
 
     io.to(data.roomId).emit('round_started', {
       round: room.currentRound,
       options: question.options,
       phase: 'selecting'
     });
+
+    // 선택 타임아웃: 10초 후 미답변자 랜덤 배정 → 자동 진행
+    setPhaseTimer(data.roomId, 10000, () => forceAnswerTimeout(data.roomId));
 
     console.log(`Game started in room ${data.roomId}, Round ${room.currentRound}`);
   });
@@ -178,6 +253,7 @@ io.on('connection', (socket) => {
     if (!room || room.host !== socket.id || room.phase !== 'question_reveal') return;
 
     room.currentQuestion.correctAnswer = data.answerIndex;
+    // next_round의 오답 판정을 위해 room.answers에도 반영 (already set via submit_answer)
     room.phase = 'excuse';
 
     const wrongPlayers = [];
@@ -193,6 +269,9 @@ io.on('connection', (socket) => {
       wrongPlayers: wrongPlayers,
       phase: 'excuse'
     });
+
+    // 변명 타임아웃: 10초 후 미제출자 빈 변명 처리
+    setPhaseTimer(data.roomId, 10000, () => forceExcuseTimeout(data.roomId));
 
     console.log(`Correct answer set: ${data.answerIndex} in room ${data.roomId}`);
   });
@@ -269,21 +348,23 @@ io.on('connection', (socket) => {
 
     if (data.rescue) {
       room.rescuedPlayers.add(data.playerId);
+      room.currentChatPlayer = null;
+      room.phase = 'excuse';
+      broadcastRoomState(data.roomId);
       io.to(data.roomId).emit('player_rescued', {
         playerId: data.playerId,
         playerName: player.name
       });
     } else {
       player.eliminated = true;
+      room.currentChatPlayer = null;
+      room.phase = 'excuse';
+      broadcastRoomState(data.roomId);
       io.to(data.roomId).emit('player_eliminated', {
         playerId: data.playerId,
         playerName: player.name
       });
     }
-
-    room.currentChatPlayer = null;
-    room.phase = 'excuse';
-    broadcastRoomState(data.roomId);
   });
 
   // 다음 라운드
@@ -303,8 +384,9 @@ io.on('connection', (socket) => {
       }
     });
 
+    // 생존자: 탈락 안 한 일반 플레이어만 (방장/관전자 제외)
     const survivors = Array.from(room.players.values()).filter(p =>
-      !p.eliminated && p.role !== 'spectator'
+      !p.eliminated && p.role === 'player'
     );
 
     if (survivors.length <= 1) {
@@ -317,7 +399,7 @@ io.on('connection', (socket) => {
 
     room.currentRound++;
     const question = getRandomQuestion(room);
-    room.currentQuestion = question;
+    room.currentQuestion = { id: question.id, question: question.question, options: question.options, correctAnswer: null };
     room.usedQuestions.add(question.id);
     room.phase = 'selecting';
     room.answers.clear();
@@ -330,11 +412,16 @@ io.on('connection', (socket) => {
       player.likes = 0;
     });
 
+    broadcastRoomState(data.roomId);
+
     io.to(data.roomId).emit('round_started', {
       round: room.currentRound,
       options: question.options,
       phase: 'selecting'
     });
+
+    // 선택 타임아웃: 10초 후 미답변자 랜덤 배정 → 자동 진행
+    setPhaseTimer(data.roomId, 10000, () => forceAnswerTimeout(data.roomId));
 
     console.log(`Next round ${room.currentRound} in room ${data.roomId}`);
   });
@@ -353,22 +440,42 @@ io.on('connection', (socket) => {
       return;
     }
 
-    // 같은 이름+역할의 기존 항목 제거 (이전 소켓 ID 정리)
-    room.players.forEach((p, oldId) => {
+    // 같은 이름+역할의 기존 항목 찾아서 상태 복원 (소켓 ID만 교체)
+    let existingPlayer = null;
+    let oldSocketId = null;
+    room.players.forEach((p, id) => {
       if (p.name === data.name && p.role === data.role) {
-        room.players.delete(oldId);
+        existingPlayer = p;
+        oldSocketId = id;
       }
     });
 
-    room.players.set(socket.id, {
-      id: socket.id,
-      name: data.name,
-      role: data.role,
-      answer: null,
-      excuse: '',
-      likes: 0,
-      eliminated: false
-    });
+    if (existingPlayer && oldSocketId !== socket.id) {
+      // 기존 상태(answer, excuse, likes, eliminated 등) 유지, ID만 갱신
+      room.players.delete(oldSocketId);
+      existingPlayer.id = socket.id;
+      room.players.set(socket.id, existingPlayer);
+      // rescuedPlayers Set도 소켓 ID 기반이므로 교체
+      if (room.rescuedPlayers.has(oldSocketId)) {
+        room.rescuedPlayers.delete(oldSocketId);
+        room.rescuedPlayers.add(socket.id);
+      }
+      if (room.answers.has(oldSocketId)) {
+        room.answers.set(socket.id, room.answers.get(oldSocketId));
+        room.answers.delete(oldSocketId);
+      }
+    } else if (!existingPlayer) {
+      // 완전히 새 플레이어
+      room.players.set(socket.id, {
+        id: socket.id,
+        name: data.name,
+        role: data.role,
+        answer: null,
+        excuse: '',
+        likes: 0,
+        eliminated: false
+      });
+    }
 
     if (data.role === 'host') {
       room.host = socket.id;
@@ -422,7 +529,8 @@ function broadcastRoomState(roomId) {
       answer: p.answer,
       excuse: p.excuse,
       likes: p.likes,
-      eliminated: p.eliminated
+      eliminated: p.eliminated,
+      rescued: room.rescuedPlayers.has(p.id)
     })),
     phase: room.phase,
     round: room.currentRound,
