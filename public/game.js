@@ -113,6 +113,7 @@ let gameState = {
     myAnswer: null,
     correctAnswer: null,  // 결과 단계에서 세팅
     isEditingQuestion: false, // 편집기 열린 상태 (updateUI가 덮어쓰지 않도록)
+    editorMode: null,     // 'host' | 'host_review' | 'player'
 };
 
 // ── DOM ──────────────────────────────────────────────────
@@ -300,11 +301,28 @@ socket.on('open_question_editor', (data) => {
     if (data.mode === 'host') {
         editorLabel.textContent = '질문과 보기를 입력하세요 (수정 가능)';
         cancelEditorBtn.style.display = 'inline-block';
+        gameState.editorMode = 'host';
+    } else if (data.mode === 'host_review') {
+        editorLabel.textContent = '📋 플레이어가 만든 질문 — 수정 후 확정하세요';
+        cancelEditorBtn.style.display = 'inline-block';
+        cancelEditorBtn.textContent = '❌ 질문 취소';
+        gameState.editorMode = 'host_review';
     } else {
         editorLabel.textContent = '질문과 보기를 자유롭게 입력하세요!';
         cancelEditorBtn.style.display = 'none';
+        gameState.editorMode = 'player';
     }
     editorQuestion.focus();
+});
+
+// ── 플레이어 질문 제출 완료 (비방장 플레이어에게) ───────
+
+socket.on('player_submitted_question', (data) => {
+    if (myRole !== 'host') {
+        showSection('waiting');
+        showPlayerWaitMsg(`${data.playerName}님의 질문을 방장이 검토 중입니다...`);
+    }
+    // 방장은 open_question_editor 이벤트로 처리됨
 });
 
 // ── 문제 편집기 닫기 ─────────────────────────────────────
@@ -749,14 +767,29 @@ submitQuestionBtn.addEventListener('click', () => {
     if (options.some(o => !o)) { showNotification('보기 4개를 모두 입력하세요', 'error'); return; }
 
     gameState.isEditingQuestion = false;
-    socket.emit('submit_question', { roomId, question, options });
-    showSection('waiting');
-    showPlayerWaitMsg('문제가 제출되었습니다. 잠시 기다려주세요...');
+
+    if (gameState.editorMode === 'host_review') {
+        // 방장이 플레이어 질문 검토 후 확정
+        socket.emit('confirm_player_question', { roomId, question, options });
+        showSection('waiting');
+        showPlayerWaitMsg('질문을 확정했습니다. 게임을 시작합니다...');
+    } else {
+        // 방장 직접 제출 or 플레이어 제출
+        socket.emit('submit_question', { roomId, question, options });
+        showSection('waiting');
+        showPlayerWaitMsg('문제가 제출되었습니다. 잠시 기다려주세요...');
+    }
+    gameState.editorMode = null;
 });
 
 // 편집기 취소 (방장만)
 cancelEditorBtn.addEventListener('click', () => {
     gameState.isEditingQuestion = false;
+    gameState.editorMode = null;
+    if (gameState.phase === 'host_review') {
+        // 플레이어 질문 검토 취소 → 방장 대기 화면
+        socket.emit('cancel_player_question', { roomId });
+    }
     showSection('waiting');
     showHostWaitControls();
 });

@@ -133,6 +133,29 @@ function forceAnswerTimeout(roomId) {
   console.log(`Answer timeout forced in ${roomId}`);
 }
 
+function startRound(roomId, question, options) {
+  const room = rooms.get(roomId);
+  if (!room) return;
+
+  room.currentQuestion = { question, options, correctAnswer: null };
+  room.phase = 'selecting';
+  room.playerMakingId = null;
+  room.pendingQuestion = null;
+  room.answers.clear();
+  room.players.forEach(p => { p.answer = null; });
+
+  broadcastRoomState(roomId);
+  io.to(roomId).emit('round_started', {
+    round: room.currentRound,
+    question: room.currentQuestion.question,
+    options: room.currentQuestion.options,
+    phase: 'selecting',
+  });
+
+  setPhaseTimer(roomId, 10000, () => forceAnswerTimeout(roomId));
+  console.log(`Round started in ${roomId}: ${question}`);
+}
+
 function broadcastRoomState(roomId) {
   const room = rooms.get(roomId);
   if (!room) return;
@@ -251,18 +274,19 @@ io.on('connection', (socket) => {
   socket.on('cancel_player_question', (data) => {
     const room = rooms.get(data.roomId);
     if (!room || room.host !== socket.id) return;
-    if (room.phase !== 'player_making') return;
+    if (room.phase !== 'player_making' && room.phase !== 'host_review') return;
 
-    // 해당 플레이어에게 편집 창 닫기
+    // 플레이어가 아직 편집 중이면 창 닫기
     if (room.playerMakingId) {
       io.to(room.playerMakingId).emit('close_question_editor');
     }
     room.playerMakingId = null;
+    room.pendingQuestion = null;
     room.phase = 'waiting';
     broadcastRoomState(data.roomId);
   });
 
-  // ── 문제 제출 (방장 또는 선택된 플레이어) ────────────
+  // ── 문제 제출 (방장 직접 → 바로 시작 / 플레이어 → 방장 검토) ──
   socket.on('submit_question', (data) => {
     const room = rooms.get(data.roomId);
     if (!room) return;
@@ -276,25 +300,40 @@ io.on('connection', (socket) => {
     if (!question || !options || options.length !== 4) return;
     if (options.some(o => !o || !o.trim())) return;
 
-    room.currentQuestion = { question: question.trim(), options: options.map(o => o.trim()), correctAnswer: null };
-    room.phase = 'selecting';
-    room.playerMakingId = null;
-    room.answers.clear();
+    if (isPlayerMaking) {
+      // 플레이어 제출 → 방장에게 검토/수정 에디터 열기
+      room.phase = 'host_review';
+      room.pendingQuestion = { question: question.trim(), options: options.map(o => o.trim()) };
+      room.playerMakingId = null;
+      broadcastRoomState(data.roomId);
 
-    // 플레이어 답변 초기화
-    room.players.forEach(p => { p.answer = null; });
+      // 플레이어들에게 대기 메시지
+      io.to(data.roomId).emit('player_submitted_question', {
+        playerName: room.players.get(socket.id)?.name || '플레이어',
+      });
+      // 방장에게만 수정 가능한 에디터 열기
+      io.to(room.host).emit('open_question_editor', {
+        mode: 'host_review',
+        prefill: { question: question.trim(), options: options.map(o => o.trim()) },
+      });
+      console.log(`Player question submitted for review in ${data.roomId}`);
+    } else {
+      // 방장 직접 제출 → 바로 게임 시작
+      startRound(data.roomId, question.trim(), options.map(o => o.trim()));
+    }
+  });
 
-    broadcastRoomState(data.roomId);
-    io.to(data.roomId).emit('round_started', {
-      round: room.currentRound,
-      question: room.currentQuestion.question,
-      options: room.currentQuestion.options,
-      phase: 'selecting',
-    });
+  // ── 방장: 플레이어 질문 검토 후 확정 ─────────────────
+  socket.on('confirm_player_question', (data) => {
+    const room = rooms.get(data.roomId);
+    if (!room || room.host !== socket.id) return;
+    if (room.phase !== 'host_review') return;
 
-    // 선택 타임아웃 10초
-    setPhaseTimer(data.roomId, 10000, () => forceAnswerTimeout(data.roomId));
-    console.log(`Question submitted in ${data.roomId}: ${question}`);
+    const { question, options } = data;
+    if (!question || !options || options.length !== 4) return;
+    if (options.some(o => !o || !o.trim())) return;
+
+    startRound(data.roomId, question.trim(), options.map(o => o.trim()));
   });
 
   // ── 플레이어 선택지 제출 ──────────────────────────────
