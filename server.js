@@ -40,6 +40,7 @@ function createRoom(roomId, hostId, hostName) {
     phaseTimer: null,
     playerMakingId: null,    // 질문 만드는 플레이어 소켓 ID
     finalWinner: null,
+    gameStarted: false,      // 게임 시작 버튼을 누른 후 true
   });
 }
 
@@ -206,11 +207,12 @@ io.on('connection', (socket) => {
   socket.on('join_room', (data) => {
     const room = rooms.get(data.roomId);
     if (!room) { socket.emit('error', { message: '방을 찾을 수 없습니다.' }); return; }
-    // waiting은 게임 시작 전 대기 단계만 — 그 외(player_making, host_review, selecting 등)는 모두 차단
-    const joinablePhases = ['waiting'];
-    // 단, waiting이라도 이미 게임이 한 번이라도 시작됐으면(round > 1이거나 플레이어가 탈락한 경우) 차단
-    const hasGameStarted = room.currentRound > 1 || Array.from(room.players.values()).some(p => p.eliminated);
-    if (!joinablePhases.includes(room.phase) || hasGameStarted) {
+    // 게임 시작 버튼을 누른 후에는 어떤 상태든 참가 불가
+    if (room.gameStarted) {
+      socket.emit('error', { message: '이미 게임이 진행 중입니다.' }); return;
+    }
+    // 그 외에도 waiting 단계가 아니면 참가 불가
+    if (room.phase !== 'waiting') {
       socket.emit('error', { message: '이미 게임이 진행 중입니다.' }); return;
     }
     if (room.players.size >= 30) { socket.emit('error', { message: '방이 가득 찼습니다. (최대 30명)' }); return; }
@@ -433,6 +435,7 @@ io.on('connection', (socket) => {
     room.currentQuestion = null;
     room.playerMakingId = null;
     room.finalWinner = null;
+    room.gameStarted = true;
     room.answers.clear();
     room.usedPresetIds.clear();
     room.players.forEach(p => {
