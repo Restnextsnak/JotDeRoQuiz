@@ -36,6 +36,24 @@
                 <li>최후의 1인이 남을 때까지 반복하며, 우승자는 방장과 독대합니다</li>
             </ul>
         </div>
+
+        <button class="coffee-btn" id="coffeeBtn">☕ 개발자에게 커피 사주기</button>
+    </div>
+
+    <!-- 커피 모달 -->
+    <div class="coffee-modal-overlay" id="coffeeOverlay">
+        <div class="coffee-modal">
+            <p class="coffee-thanks">플레이해주셔서 감사합니다! ☕</p>
+            <p class="coffee-dev">개발자: 레부니 <span class="coffee-email">(strongest5644@gmail.com)</span></p>
+            <div class="coffee-account-wrap">
+                <span class="coffee-account-label">하나</span>
+                <button class="coffee-account-btn" id="copyAccountBtn" title="클릭하여 복사">
+                    50991074280107
+                </button>
+                <span class="coffee-copied" id="copiedMsg">복사됨!</span>
+            </div>
+            <button class="coffee-close-btn" id="coffeeCloseBtn">닫기</button>
+        </div>
     </div>
 
     <script src="/socket.io/socket.io.js"></script>
@@ -80,6 +98,29 @@
         
         socket.on('error', (data) => {
             alert(data.message);
+        });
+
+        // 커피 모달
+        const coffeeBtn      = document.getElementById('coffeeBtn');
+        const coffeeOverlay  = document.getElementById('coffeeOverlay');
+        const coffeeCloseBtn = document.getElementById('coffeeCloseBtn');
+        const copyAccountBtn = document.getElementById('copyAccountBtn');
+        const copiedMsg      = document.getElementById('copiedMsg');
+
+        coffeeBtn.addEventListener('click', () => {
+            coffeeOverlay.classList.add('active');
+        });
+        coffeeCloseBtn.addEventListener('click', () => {
+            coffeeOverlay.classList.remove('active');
+        });
+        coffeeOverlay.addEventListener('click', (e) => {
+            if (e.target === coffeeOverlay) coffeeOverlay.classList.remove('active');
+        });
+        copyAccountBtn.addEventListener('click', () => {
+            navigator.clipboard.writeText('50991074280107').then(() => {
+                copiedMsg.classList.add('show');
+                setTimeout(() => copiedMsg.classList.remove('show'), 1800);
+            });
         });
     </script>
 </body>

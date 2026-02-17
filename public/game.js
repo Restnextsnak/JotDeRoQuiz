@@ -342,7 +342,7 @@ socket.on('round_started', (data) => {
     questionTextEl.textContent = myRole === 'host' ? '플레이어들이 선택 중...' : data.question;
     confirmAnswerArea.style.display = 'none';
     renderOptions(data.options, optionsAreaEl, myRole !== 'player');
-    startTimer(10);
+    startTimer(20);
     startTickSound();   // 째깍째깍 시작
     updatePlayerList();
 });
@@ -452,6 +452,11 @@ socket.on('game_finished', (data) => {
 
 socket.on('room_destroyed', () => {
     alert('방이 종료되었습니다.');
+    window.location.href = '/';
+});
+
+socket.on('error', (data) => {
+    alert(data.message || '오류가 발생했습니다.');
     window.location.href = '/';
 });
 

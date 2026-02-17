@@ -509,6 +509,11 @@ io.on('connection', (socket) => {
       }
       if (room.playerMakingId === oldId) room.playerMakingId = socket.id;
     } else if (!existing) {
+      // 기존 플레이어 기록이 없으면 신규 접속 — 게임이 시작된 경우 차단
+      if (room.gameStarted) {
+        socket.emit('error', { message: '이미 게임이 진행 중입니다.' });
+        return;
+      }
       room.players.set(socket.id, {
         id: socket.id, name: data.name, role: data.role,
         answer: null, eliminated: false, score: 0,
