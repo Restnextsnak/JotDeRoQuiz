@@ -153,7 +153,7 @@ function startRound(roomId, question, options) {
     phase: 'selecting',
   });
 
-  setPhaseTimer(roomId, 10000, () => forceAnswerTimeout(roomId));
+  setPhaseTimer(roomId, 20000, () => forceAnswerTimeout(roomId));
   console.log(`Round started in ${roomId}: ${question}`);
 }
 

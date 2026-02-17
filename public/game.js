@@ -37,7 +37,7 @@ function stopTickSound() {
 
 // 두구두구 (drum roll) 사운드
 let drumInterval = null;
-let drumSpeed = 500;
+const DRUM_INTERVAL_MS = 600; // 일정 속도, 빨라지지 않음
 function playDrum() {
     const buf  = audioCtx.createBuffer(1, audioCtx.sampleRate * 0.08, audioCtx.sampleRate);
     const data = buf.getChannelData(0);
@@ -58,16 +58,11 @@ function playDrum() {
 }
 function startDrumRoll() {
     stopDrumRoll();
-    drumSpeed = 500;
-    const tick = () => {
-        playDrum();
-        drumSpeed = Math.max(80, drumSpeed * 0.92);
-        drumInterval = setTimeout(tick, drumSpeed);
-    };
-    tick();
+    playDrum();
+    drumInterval = setInterval(playDrum, DRUM_INTERVAL_MS);
 }
 function stopDrumRoll() {
-    if (drumInterval) { clearTimeout(drumInterval); drumInterval = null; }
+    if (drumInterval) { clearInterval(drumInterval); drumInterval = null; }
 }
 
 // 탈락 효과음
