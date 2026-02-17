@@ -15,6 +15,7 @@ let gameState = {
     question: null,       // { question, options, correctAnswer }
     myAnswer: null,
     correctAnswer: null,  // 결과 단계에서 세팅
+    isEditingQuestion: false, // 편집기 열린 상태 (updateUI가 덮어쓰지 않도록)
 };
 
 // ── DOM ──────────────────────────────────────────────────
@@ -50,10 +51,14 @@ const cancelEditorBtn    = document.getElementById('cancelEditorBtn');
 // 선택 단계
 const questionTextEl     = document.getElementById('questionText');
 const optionsAreaEl      = document.getElementById('optionsArea');
+const confirmAnswerArea  = document.getElementById('confirmAnswerArea');
+const confirmAnswerBtn   = document.getElementById('confirmAnswerBtn');
 
 // 방장 판정
 const judgeQuestionText  = document.getElementById('judgeQuestionText');
 const judgeOptionsArea   = document.getElementById('judgeOptionsArea');
+const confirmJudgeArea   = document.getElementById('confirmJudgeArea');
+const confirmJudgeBtn    = document.getElementById('confirmJudgeBtn');
 
 // 결과
 const resultQuestionText = document.getElementById('resultQuestionText');
@@ -94,10 +99,10 @@ socket.on('connect', () => {
 // ── 방 상태 ─────────────────────────────────────────────
 
 socket.on('room_state', (state) => {
-    gameState.players       = state.players;
-    gameState.phase         = state.phase;
-    gameState.round         = state.round;
-    gameState.hostId        = state.hostId;
+    gameState.players        = state.players;
+    gameState.phase          = state.phase;
+    gameState.round          = state.round;
+    gameState.hostId         = state.hostId;
     gameState.playerMakingId = state.playerMakingId;
     if (state.question) gameState.question = state.question;
 
@@ -108,9 +113,12 @@ socket.on('room_state', (state) => {
 // ── 게임 시작 ────────────────────────────────────────────
 
 socket.on('game_started', () => {
-    gameState.phase    = 'waiting';
-    gameState.myAnswer = null;
+    gameState.phase         = 'waiting';
+    gameState.myAnswer      = null;
     gameState.correctAnswer = null;
+    gameState.pendingAnswer = null;
+    gameState.pendingJudge  = null;
+    gameState.question      = null;
     showSection('waiting');
     phaseInfoEl.textContent = '문제 준비 중';
     if (myRole === 'host') {
@@ -142,13 +150,14 @@ socket.on('round_waiting', (data) => {
 
 socket.on('player_making_question', (data) => {
     gameState.phase = 'player_making';
-    showSection('waiting');
+    gameState.playerMakingId = data.playerId;
+
     if (myRole === 'host') {
-        // 방장은 취소 버튼 표시
+        // 방장: 취소 버튼 포함한 대기 메시지
+        showSection('waiting');
         hostWaitControls.style.display = 'none';
         playerWaitMsg.style.display    = 'block';
         waitMsgText.textContent = `${data.playerName}님이 질문을 만드는 중...`;
-        // 취소 버튼 동적 추가
         let cancelBtn = document.getElementById('cancelPlayerQuestionBtn');
         if (!cancelBtn) {
             cancelBtn = document.createElement('button');
@@ -158,7 +167,16 @@ socket.on('player_making_question', (data) => {
             cancelBtn.onclick = () => socket.emit('cancel_player_question', { roomId });
             playerWaitMsg.appendChild(cancelBtn);
         }
-    } else if (socket.id !== data.playerId) {
+    } else if (socket.id === data.playerId) {
+        // 선택된 플레이어: open_question_editor가 이미 왔거나 곧 오므로 편집기 표시
+        gameState.isEditingQuestion = true;
+        showSection('editor');
+        editorLabel.textContent = '질문과 보기를 자유롭게 입력하세요!';
+        cancelEditorBtn.style.display = 'none';
+        editorQuestion.focus();
+    } else {
+        // 다른 플레이어: 대기 메시지
+        showSection('waiting');
         showPlayerWaitMsg(`${data.playerName}님이 질문을 만드는 중...`);
     }
 });
@@ -166,6 +184,7 @@ socket.on('player_making_question', (data) => {
 // ── 문제 편집기 열기 ─────────────────────────────────────
 
 socket.on('open_question_editor', (data) => {
+    gameState.isEditingQuestion = true;
     showSection('editor');
     editorQuestion.value = '';
     editorOptionInputs.forEach(inp => inp.value = '');
@@ -190,6 +209,7 @@ socket.on('open_question_editor', (data) => {
 // ── 문제 편집기 닫기 ─────────────────────────────────────
 
 socket.on('close_question_editor', () => {
+    gameState.isEditingQuestion = false;
     showSection('waiting');
     showPlayerWaitMsg('방장이 질문을 취소했습니다. 잠시 기다려주세요...');
 });
@@ -200,12 +220,13 @@ socket.on('round_started', (data) => {
     gameState.phase   = 'selecting';
     gameState.myAnswer = null;
     gameState.correctAnswer = null;
-    // options만 있음 (question은 host_judging 때 공개)
-    gameState.question = { options: data.options };
+    gameState.pendingAnswer = null; // 확정 전 임시 선택
+    gameState.question = { question: data.question, options: data.options };
 
     phaseInfoEl.textContent = '선택 중';
     showSection('selecting');
-    questionTextEl.textContent = myRole === 'host' ? '플레이어들이 선택 중...' : '???';
+    questionTextEl.textContent = myRole === 'host' ? '플레이어들이 선택 중...' : data.question;
+    confirmAnswerArea.style.display = 'none';
     renderOptions(data.options, optionsAreaEl, myRole !== 'player');
     startTimer(10);
     updatePlayerList();
@@ -213,18 +234,22 @@ socket.on('round_started', (data) => {
 
 // ── 모두 답변 완료 → 방장 판정 ──────────────────────────
 
-socket.on('all_answered', () => {
+socket.on('all_answered', (data) => {
     gameState.phase = 'host_judging';
+    gameState.question = { question: data.question, options: data.options };
+    gameState.pendingJudge = null; // 확정 전 임시 정답 선택
     stopTimer();
     phaseInfoEl.textContent = myRole === 'host' ? '정답을 선택하세요' : '방장이 정답 선택 중...';
 
     if (myRole === 'host') {
         showSection('host_judging');
-        judgeQuestionText.textContent = gameState.question?.question || '';
-        renderOptions(gameState.question?.options || [], judgeOptionsArea, false, true);
+        judgeQuestionText.textContent = data.question || '';
+        confirmJudgeArea.style.display = 'none';
+        renderOptions(data.options || [], judgeOptionsArea, false, true);
     } else {
         showSection('selecting');
-        questionTextEl.textContent = gameState.question?.question || '???';
+        questionTextEl.textContent = data.question || '';
+        confirmAnswerArea.style.display = 'none';
         disableOptions(optionsAreaEl);
     }
     updatePlayerList();
@@ -304,6 +329,9 @@ function updateUI() {
     roundInfoEl.textContent = `라운드 ${gameState.round}`;
     updatePlayerList();
 
+    // 편집기 열린 중이면 섹션 전환 스킵
+    if (gameState.isEditingQuestion) return;
+
     // phase별 섹션 표시
     switch (gameState.phase) {
         case 'waiting':
@@ -324,11 +352,18 @@ function updateUI() {
             // player_making_question 이벤트에서 처리
             break;
         case 'selecting':
+            // 섹션 전환만 — 내용은 round_started 이벤트에서 렌더링
             showSection('selecting');
             phaseInfoEl.textContent = '선택 중';
             break;
         case 'host_judging':
+            // 섹션 전환만 — 내용은 all_answered 이벤트에서 렌더링
             phaseInfoEl.textContent = myRole === 'host' ? '정답을 선택하세요' : '방장이 정답 선택 중...';
+            if (myRole === 'host') {
+                showSection('host_judging');
+            } else {
+                showSection('selecting');
+            }
             break;
         case 'result':
             phaseInfoEl.textContent = '결과 발표';
@@ -414,17 +449,22 @@ function renderOptions(options, container, disabled = false, isJudge = false) {
 
         if (!disabled) {
             if (isJudge) {
+                // 방장: 클릭하면 임시 선택 표시, 확정 버튼으로 제출
+                if (gameState.pendingJudge === i) btn.classList.add('selected');
                 btn.addEventListener('click', () => {
-                    socket.emit('select_correct_answer', { roomId, answerIndex: i });
-                    Array.from(container.children).forEach(b => b.disabled = true);
+                    gameState.pendingJudge = i;
+                    Array.from(container.children).forEach(b => b.classList.remove('selected'));
                     btn.classList.add('selected');
+                    confirmJudgeArea.style.display = 'block';
                 });
             } else {
+                // 플레이어: 클릭하면 임시 선택 표시, 확정 버튼으로 제출
                 if (gameState.myAnswer !== null) {
                     btn.disabled = true;
                     if (gameState.myAnswer === i) btn.classList.add('selected');
                 } else {
-                    btn.addEventListener('click', () => selectOption(i));
+                    if (gameState.pendingAnswer === i) btn.classList.add('pending');
+                    btn.addEventListener('click', () => selectPending(i));
                 }
             }
         }
@@ -449,15 +489,30 @@ function disableOptions(container) {
     container.querySelectorAll('.option-button').forEach(b => b.disabled = true);
 }
 
-function selectOption(index) {
+function selectPending(index) {
     if (myRole !== 'player' || gameState.myAnswer !== null || gameState.phase !== 'selecting') return;
+    gameState.pendingAnswer = index;
+    // 버튼 시각적 표시 갱신
+    optionsAreaEl.querySelectorAll('.option-button').forEach((btn, i) => {
+        btn.classList.remove('pending', 'selected');
+        if (i === index) btn.classList.add('pending');
+    });
+    confirmAnswerArea.style.display = 'block';
+}
+
+function confirmAnswer() {
+    if (myRole !== 'player' || gameState.myAnswer !== null || gameState.phase !== 'selecting') return;
+    if (gameState.pendingAnswer === null) return;
+    const index = gameState.pendingAnswer;
     gameState.myAnswer = index;
     socket.emit('submit_answer', { roomId, answerIndex: index });
 
     optionsAreaEl.querySelectorAll('.option-button').forEach((btn, i) => {
+        btn.classList.remove('pending');
         btn.disabled = true;
         if (i === index) btn.classList.add('selected');
     });
+    confirmAnswerArea.style.display = 'none';
 }
 
 // ── 타이머 ───────────────────────────────────────────────
@@ -516,6 +571,7 @@ submitQuestionBtn.addEventListener('click', () => {
     if (!question) { showNotification('질문을 입력하세요', 'error'); return; }
     if (options.some(o => !o)) { showNotification('보기 4개를 모두 입력하세요', 'error'); return; }
 
+    gameState.isEditingQuestion = false;
     socket.emit('submit_question', { roomId, question, options });
     showSection('waiting');
     showPlayerWaitMsg('문제가 제출되었습니다. 잠시 기다려주세요...');
@@ -523,8 +579,24 @@ submitQuestionBtn.addEventListener('click', () => {
 
 // 편집기 취소 (방장만)
 cancelEditorBtn.addEventListener('click', () => {
+    gameState.isEditingQuestion = false;
     showSection('waiting');
     showHostWaitControls();
+});
+
+// 플레이어 선택 확정
+confirmAnswerBtn.addEventListener('click', () => {
+    confirmAnswer();
+});
+
+// 방장 정답 확정
+confirmJudgeBtn.addEventListener('click', () => {
+    if (gameState.pendingJudge === null) return;
+    socket.emit('select_correct_answer', { roomId, answerIndex: gameState.pendingJudge });
+    confirmJudgeArea.style.display = 'none';
+    // 버튼 모두 비활성화
+    judgeOptionsArea.querySelectorAll('.option-button').forEach(b => b.disabled = true);
+    gameState.pendingJudge = null;
 });
 
 // 다음 라운드
@@ -535,10 +607,18 @@ nextRoundBtn.addEventListener('click', () => {
 
 // 재시작
 restartBtn.addEventListener('click', () => {
-    socket.emit('start_game', { roomId });
+    // 먼저 UI 초기화 후 서버에 요청
     finalChatPanel.style.display = 'none';
+    finalChatMessages.innerHTML  = '';
+    finalChatInput.style.display = 'none';
     rightIdle.style.display      = 'block';
     restartBtn.style.display     = 'none';
+    winnerDisplay.innerHTML      = '';
+    gameState.myAnswer           = null;
+    gameState.correctAnswer      = null;
+    gameState.pendingAnswer      = null;
+    gameState.pendingJudge       = null;
+    socket.emit('start_game', { roomId });
 });
 
 // 방 폭파

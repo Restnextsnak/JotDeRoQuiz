@@ -86,7 +86,12 @@ function checkAllPlayersAnswered(roomId) {
   if (alive.length > 0 && answered === alive.length) {
     clearPhaseTimer(roomId);
     room.phase = 'host_judging';
-    io.to(roomId).emit('all_answered', { phase: 'host_judging' });
+    broadcastRoomState(roomId);
+    io.to(roomId).emit('all_answered', {
+      phase: 'host_judging',
+      question: room.currentQuestion.question,
+      options: room.currentQuestion.options,
+    });
     console.log(`All answered in ${roomId}`);
   }
 }
@@ -104,9 +109,13 @@ function forceAnswerTimeout(roomId) {
     }
   });
 
-  broadcastRoomState(roomId);
   room.phase = 'host_judging';
-  io.to(roomId).emit('all_answered', { phase: 'host_judging' });
+  broadcastRoomState(roomId);
+  io.to(roomId).emit('all_answered', {
+    phase: 'host_judging',
+    question: room.currentQuestion.question,
+    options: room.currentQuestion.options,
+  });
   console.log(`Answer timeout forced in ${roomId}`);
 }
 
@@ -127,10 +136,11 @@ function broadcastRoomState(roomId) {
     round: room.currentRound,
     hostId: room.host,
     playerMakingId: room.playerMakingId,
-    // 선택 단계에서는 question 숨김, host_judging/result에서만 공개
-    question: (room.phase === 'host_judging' || room.phase === 'result' || room.phase === 'finished')
-      ? room.currentQuestion
-      : (room.currentQuestion ? { options: room.currentQuestion.options } : null),
+    question: room.currentQuestion ? {
+      question: room.currentQuestion.question,
+      options: room.currentQuestion.options,
+      correctAnswer: room.currentQuestion.correctAnswer,
+    } : null,
   };
 
   io.to(roomId).emit('room_state', state);
@@ -263,6 +273,7 @@ io.on('connection', (socket) => {
     broadcastRoomState(data.roomId);
     io.to(data.roomId).emit('round_started', {
       round: room.currentRound,
+      question: room.currentQuestion.question,
       options: room.currentQuestion.options,
       phase: 'selecting',
     });
@@ -346,13 +357,20 @@ io.on('connection', (socket) => {
     console.log(`Round ${room.currentRound} waiting in ${data.roomId}`);
   });
 
-  // ── 게임 시작 (첫 라운드) ─────────────────────────────
+  // ── 게임 시작 (첫 라운드 또는 재시작) ───────────────────
   socket.on('start_game', (data) => {
     const room = rooms.get(data.roomId);
     if (!room || room.host !== socket.id) return;
-    if (room.phase !== 'waiting') return;
+    // waiting(게임 전) 또는 finished(재시작) 상태에서만 허용
+    if (room.phase !== 'waiting' && room.phase !== 'finished') return;
 
+    clearPhaseTimer(data.roomId);
     room.currentRound = 1;
+    room.phase = 'waiting';
+    room.currentQuestion = null;
+    room.playerMakingId = null;
+    room.finalWinner = null;
+    room.answers.clear();
     room.usedPresetIds.clear();
     room.players.forEach(p => {
       p.answer = null;

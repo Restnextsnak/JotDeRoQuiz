@@ -22,16 +22,6 @@
                 <h2>방 참가하기</h2>
                 <input type="text" id="playerName" placeholder="닉네임 입력" maxlength="10">
                 <input type="text" id="roomCode" placeholder="방 코드 입력" maxlength="6" style="text-transform: uppercase;">
-                <div class="role-select">
-                    <label>
-                        <input type="radio" name="role" value="player" checked>
-                        플레이어
-                    </label>
-                    <label>
-                        <input type="radio" name="role" value="spectator">
-                        관전자
-                    </label>
-                </div>
                 <button id="joinRoomBtn">참가</button>
             </div>
         </div>
@@ -39,11 +29,11 @@
         <div class="rules">
             <h3>게임 규칙</h3>
             <ul>
-                <li>문제 없이 4개의 선택지만 보고 정답을 골라야 합니다</li>
-                <li>모두 선택 후 문제가 공개되고 방장이 정답을 지정합니다</li>
-                <li>오답자는 20자 이내 변명을 작성합니다</li>
-                <li>방장이 1:1 채팅으로 심문 후 구제 여부를 결정합니다</li>
-                <li>최후의 1인이 남을 때까지 계속됩니다</li>
+                <li>방장이 질문과 보기 4개를 만들거나, 랜덤/플레이어 질문을 선택합니다</li>
+                <li>플레이어는 문제를 보지 못한 채 보기만 보고 10초 안에 선택합니다</li>
+                <li>모두 선택하면 문제가 공개되고, 방장이 정답을 지정합니다</li>
+                <li>오답을 고른 플레이어는 즉시 탈락합니다</li>
+                <li>최후의 1인이 남을 때까지 반복하며, 우승자는 방장과 독대합니다</li>
             </ul>
         </div>
     </div>
@@ -64,14 +54,13 @@
         document.getElementById('joinRoomBtn').addEventListener('click', () => {
             const name = document.getElementById('playerName').value.trim();
             const roomId = document.getElementById('roomCode').value.trim().toUpperCase();
-            const role = document.querySelector('input[name="role"]:checked').value;
-            
+
             if (!name || !roomId) {
                 alert('닉네임과 방 코드를 입력해주세요');
                 return;
             }
-            
-            socket.emit('join_room', { name, roomId, role });
+
+            socket.emit('join_room', { name, roomId, role: 'player' });
         });
         
         socket.on('room_created', (data) => {

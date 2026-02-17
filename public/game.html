@@ -11,9 +11,10 @@
 
         <!-- 왼쪽: 플레이어 목록 -->
         <div class="left-panel">
+            <div class="room-code-display" id="roomCode">방 코드: </div>
             <div class="panel-header">
-                <span id="roomCode">방 코드: </span>
                 <span id="roundInfo">라운드 1</span>
+                <span id="phaseInfoSub"></span>
             </div>
             <div class="host-card" id="hostCard"></div>
             <div class="players-area" id="playersArea"></div>
@@ -77,6 +78,9 @@
             <div id="selectingArea" class="game-section" style="display:none;">
                 <p class="question-text" id="questionText">???</p>
                 <div class="options-area" id="optionsArea"></div>
+                <div id="confirmAnswerArea" style="display:none; margin-top:12px;">
+                    <button class="host-btn big" id="confirmAnswerBtn">✅ 선택 확정</button>
+                </div>
             </div>
 
             <!-- 방장 판정 단계 -->
@@ -84,6 +88,9 @@
                 <p class="section-label">정답을 선택하세요 (방장)</p>
                 <p class="question-text" id="judgeQuestionText"></p>
                 <div class="options-area" id="judgeOptionsArea"></div>
+                <div id="confirmJudgeArea" style="display:none; margin-top:12px;">
+                    <button class="host-btn big" id="confirmJudgeBtn">✅ 정답 확정</button>
+                </div>
             </div>
 
             <!-- 결과 단계 -->
