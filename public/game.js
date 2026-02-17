@@ -1,50 +1,89 @@
 const socket = io();
 
-const roomId = localStorage.getItem('roomId');
-const myRole = localStorage.getItem('role');
+const roomId  = localStorage.getItem('roomId');
+const myRole  = localStorage.getItem('role');
 
-if (!roomId || !myRole) {
-    window.location.href = '/';
-}
+if (!roomId || !myRole) window.location.href = '/';
 
 let gameState = {
     myId: null,
     players: [],
     phase: 'waiting',
     round: 1,
-    currentQuestion: null,
-    currentOptions: [],
-    myAnswer: null,
-    currentChatPlayer: null,
     hostId: null,
-    correctAnswer: null   // 방장이 고른 정답 인덱스
+    playerMakingId: null,
+    question: null,       // { question, options, correctAnswer }
+    myAnswer: null,
+    correctAnswer: null,  // 결과 단계에서 세팅
 };
 
-// 채팅 기록: playerId -> [{senderId, senderName, message}]
-const chatHistory = new Map();
+// ── DOM ──────────────────────────────────────────────────
+const roomCodeEl         = document.getElementById('roomCode');
+const roundInfoEl        = document.getElementById('roundInfo');
+const phaseInfoEl        = document.getElementById('phaseInfo');
+const timerTextEl        = document.getElementById('timerText');
+const hostCardEl         = document.getElementById('hostCard');
+const playersAreaEl      = document.getElementById('playersArea');
 
-// DOM 요소
-const roomCodeEl      = document.getElementById('roomCode');
-const roundInfoEl     = document.getElementById('roundInfo');
-const phaseInfoEl     = document.getElementById('phaseInfo');
-const hostCardEl      = document.getElementById('hostCard');
-const hostControlsEl  = document.getElementById('hostControls');
-const playersAreaEl   = document.getElementById('playersArea');
-const questionTextEl  = document.getElementById('questionText');
-const optionsAreaEl   = document.getElementById('optionsArea');
-const timerTextEl     = document.getElementById('timerText');
-const chatMessagesEl  = document.getElementById('chatMessages');
-const chatInputAreaEl = document.getElementById('chatInputArea');
-const chatInputEl     = document.getElementById('chatInput');
-const chatPlayerNameEl= document.getElementById('chatPlayerName');
-const excuseAreaEl    = document.getElementById('excuseArea');
-const startGameBtn    = document.getElementById('startGameBtn');
-const nextRoundBtn    = document.getElementById('nextRoundBtn');
-const sendChatBtn     = document.getElementById('sendChatBtn');
+// 섹션들
+const waitingArea        = document.getElementById('waitingArea');
+const questionEditor     = document.getElementById('questionEditor');
+const selectingArea      = document.getElementById('selectingArea');
+const hostJudgingArea    = document.getElementById('hostJudgingArea');
+const resultArea         = document.getElementById('resultArea');
+const finishedArea       = document.getElementById('finishedArea');
+
+// 대기 영역
+const hostWaitControls   = document.getElementById('hostWaitControls');
+const playerWaitMsg      = document.getElementById('playerWaitMsg');
+const waitMsgText        = document.getElementById('waitMsgText');
+const preGameArea        = document.getElementById('preGameArea');
+const startGameBtn       = document.getElementById('startGameBtn');
+
+// 문제 편집기
+const editorLabel        = document.getElementById('editorLabel');
+const editorQuestion     = document.getElementById('editorQuestion');
+const editorOptionInputs = document.querySelectorAll('.editor-option-input');
+const submitQuestionBtn  = document.getElementById('submitQuestionBtn');
+const cancelEditorBtn    = document.getElementById('cancelEditorBtn');
+
+// 선택 단계
+const questionTextEl     = document.getElementById('questionText');
+const optionsAreaEl      = document.getElementById('optionsArea');
+
+// 방장 판정
+const judgeQuestionText  = document.getElementById('judgeQuestionText');
+const judgeOptionsArea   = document.getElementById('judgeOptionsArea');
+
+// 결과
+const resultQuestionText = document.getElementById('resultQuestionText');
+const resultOptionsArea  = document.getElementById('resultOptionsArea');
+const eliminatedList     = document.getElementById('eliminatedList');
+const hostNextControls   = document.getElementById('hostNextControls');
+const nextRoundBtn       = document.getElementById('nextRoundBtn');
+
+// 종료
+const winnerDisplay      = document.getElementById('winnerDisplay');
+const restartBtn         = document.getElementById('restartBtn');
+
+// 오른쪽 패널
+const rightIdle          = document.getElementById('rightIdle');
+const finalChatPanel     = document.getElementById('finalChatPanel');
+const finalChatMessages  = document.getElementById('finalChatMessages');
+const finalChatInput     = document.getElementById('finalChatInput');
+const finalChatInputEl   = document.getElementById('finalChatInputEl');
+const finalChatSendBtn   = document.getElementById('finalChatSendBtn');
+const hostDestroyArea    = document.getElementById('hostDestroyArea');
+const destroyRoomBtn     = document.getElementById('destroyRoomBtn');
+
+// 방장 질문 소스 버튼
+const btnMakeQuestion    = document.getElementById('btnMakeQuestion');
+const btnRandomQuestion  = document.getElementById('btnRandomQuestion');
+const btnPlayerQuestion  = document.getElementById('btnPlayerQuestion');
 
 roomCodeEl.textContent = `방 코드: ${roomId}`;
 
-// ── 소켓 연결 ──────────────────────────────────────────────
+// ── 소켓 연결 ────────────────────────────────────────────
 
 socket.on('connect', () => {
     gameState.myId = socket.id;
@@ -52,273 +91,366 @@ socket.on('connect', () => {
     socket.emit('rejoin_room', { roomId, name: playerName, role: myRole });
 });
 
-// 방 상태 업데이트
+// ── 방 상태 ─────────────────────────────────────────────
+
 socket.on('room_state', (state) => {
-    // 서버에서 받은 players에는 rescued 필드가 포함됨 — 그대로 사용
-    gameState.players          = state.players;
-    gameState.phase            = state.phase;
-    gameState.round            = state.round;
-    gameState.currentChatPlayer= state.currentChatPlayer;
-    gameState.hostId           = state.hostId;
+    gameState.players       = state.players;
+    gameState.phase         = state.phase;
+    gameState.round         = state.round;
+    gameState.hostId        = state.hostId;
+    gameState.playerMakingId = state.playerMakingId;
+    if (state.question) gameState.question = state.question;
+
+    roundInfoEl.textContent = `라운드 ${state.round}`;
     updateUI();
 });
 
-// 라운드 시작
-socket.on('round_started', (data) => {
-    gameState.round          = data.round;
-    gameState.phase          = data.phase;
-    gameState.currentOptions = data.options;
-    gameState.myAnswer       = null;
-    gameState.correctAnswer  = null;
+// ── 게임 시작 ────────────────────────────────────────────
 
-    // 로컬 플레이어 상태 즉시 초기화 (room_state 도착 전 UI가 깨끗하게 보이도록)
-    gameState.players.forEach(p => {
-        p.answer  = null;
-        p.excuse  = '';
-        p.likes   = 0;
-        p.rescued = false;
-    });
-
-    roundInfoEl.textContent  = `라운드: ${data.round}`;
-    phaseInfoEl.textContent  = '선택 중';
-    questionTextEl.textContent = myRole === 'host' ? '플레이어들이 선택 중...' : '???';
-
-    // 변명 입력창 초기화
-    excuseAreaEl.style.display = 'none';
-    excuseAreaEl.innerHTML     = '';
-
-    updateUI();
-    renderOptions(data.options);
-    startTimer(10);
-});
-
-// 모두 답변 완료 → 문제 공개
-socket.on('all_answered', (data) => {
-    gameState.phase          = data.phase;
-    gameState.currentQuestion = data.question;
-
-    phaseInfoEl.textContent  = myRole === 'host' ? '정답 선택 (방장)' : '문제 공개';
-    questionTextEl.textContent = data.question;
-    stopTimer();
-
-    if (myRole === 'host') {
-        enableOptionsForHost();
-    } else {
-        disableOptions();
-    }
-});
-
-// 정답 공개
-socket.on('answer_revealed', (data) => {
-    gameState.phase         = data.phase;
-    gameState.correctAnswer = data.correctAnswer;
-    phaseInfoEl.textContent = '변명 시간';
-
-    highlightCorrectAnswer(data.correctAnswer);
-    disableOptions();
-
-    // 1) 방장: nextRoundBtn 표시 (정답 선택 완료 시점)
-    if (myRole === 'host') {
-        startGameBtn.style.display  = 'none';
-        nextRoundBtn.style.display  = 'block';
-    }
-
-    // 2) 오답자 플레이어: 변명 입력창 표시
-    const me = gameState.players.find(p => p.id === gameState.myId);
-    if (me && me.answer !== data.correctAnswer && !me.eliminated && myRole === 'player') {
-        showExcuseInput();
-    }
-
-    startTimer(10);
-});
-
-// 채팅 시작
-socket.on('chat_started', (data) => {
-    gameState.currentChatPlayer = data.playerId;
-    showChatPanel(data.playerId, data.playerName);
-});
-
-// 채팅 메시지 수신
-socket.on('chat_message', (data) => {
-    // 기록 저장
-    const pid = gameState.currentChatPlayer;
-    if (!chatHistory.has(pid)) chatHistory.set(pid, []);
-    chatHistory.get(pid).push(data);
-
-    appendChatMessage(data);
-});
-
-// 플레이어 구제 (room_state가 먼저 도착해 gameState.players가 이미 갱신된 상태)
-socket.on('player_rescued', (data) => {
-    showNotification(`${data.playerName}님이 구제되었습니다!`, 'success');
-    closeChatPanel();
-    // room_state로 이미 rescued:true 가 반영됐으므로 updateUI만 호출
-    updateUI();
-});
-
-// 플레이어 탈락
-socket.on('player_eliminated', (data) => {
-    showNotification(`${data.playerName}님이 탈락했습니다!`, 'error');
-    closeChatPanel();
-    // room_state로 이미 eliminated:true 가 반영됐으므로 updateUI만 호출
-    updateUI();
-});
-
-// 게임 종료
-socket.on('game_finished', (data) => {
-    stopTimer();
-    gameState.phase         = 'finished';
+socket.on('game_started', () => {
+    gameState.phase    = 'waiting';
+    gameState.myAnswer = null;
     gameState.correctAnswer = null;
-    phaseInfoEl.textContent = '게임 종료';
+    showSection('waiting');
+    phaseInfoEl.textContent = '문제 준비 중';
+    if (myRole === 'host') {
+        showHostWaitControls();
+    } else {
+        showPlayerWaitMsg('방장이 문제를 준비 중입니다...');
+    }
+});
 
-    // 변명 입력창 숨기기
-    excuseAreaEl.style.display = 'none';
-    excuseAreaEl.innerHTML     = '';
+// ── 라운드 대기 (다음 라운드) ────────────────────────────
+
+socket.on('round_waiting', (data) => {
+    gameState.phase    = 'waiting';
+    gameState.round    = data.round;
+    gameState.myAnswer = null;
+    gameState.correctAnswer = null;
+    gameState.question = null;
+    roundInfoEl.textContent = `라운드 ${data.round}`;
+    phaseInfoEl.textContent = '문제 준비 중';
+    showSection('waiting');
+    if (myRole === 'host') {
+        showHostWaitControls();
+    } else {
+        showPlayerWaitMsg('방장이 문제를 준비 중입니다...');
+    }
+});
+
+// ── 플레이어 질문 만드는 중 ──────────────────────────────
+
+socket.on('player_making_question', (data) => {
+    gameState.phase = 'player_making';
+    showSection('waiting');
+    if (myRole === 'host') {
+        // 방장은 취소 버튼 표시
+        hostWaitControls.style.display = 'none';
+        playerWaitMsg.style.display    = 'block';
+        waitMsgText.textContent = `${data.playerName}님이 질문을 만드는 중...`;
+        // 취소 버튼 동적 추가
+        let cancelBtn = document.getElementById('cancelPlayerQuestionBtn');
+        if (!cancelBtn) {
+            cancelBtn = document.createElement('button');
+            cancelBtn.id = 'cancelPlayerQuestionBtn';
+            cancelBtn.className = 'cancel-btn';
+            cancelBtn.textContent = '❌ 질문 취소';
+            cancelBtn.onclick = () => socket.emit('cancel_player_question', { roomId });
+            playerWaitMsg.appendChild(cancelBtn);
+        }
+    } else if (socket.id !== data.playerId) {
+        showPlayerWaitMsg(`${data.playerName}님이 질문을 만드는 중...`);
+    }
+});
+
+// ── 문제 편집기 열기 ─────────────────────────────────────
+
+socket.on('open_question_editor', (data) => {
+    showSection('editor');
+    editorQuestion.value = '';
+    editorOptionInputs.forEach(inp => inp.value = '');
+
+    if (data.prefill) {
+        editorQuestion.value = data.prefill.question || '';
+        data.prefill.options.forEach((opt, i) => {
+            if (editorOptionInputs[i]) editorOptionInputs[i].value = opt;
+        });
+    }
+
+    if (data.mode === 'host') {
+        editorLabel.textContent = '질문과 보기를 입력하세요 (수정 가능)';
+        cancelEditorBtn.style.display = 'inline-block';
+    } else {
+        editorLabel.textContent = '질문과 보기를 자유롭게 입력하세요!';
+        cancelEditorBtn.style.display = 'none';
+    }
+    editorQuestion.focus();
+});
+
+// ── 문제 편집기 닫기 ─────────────────────────────────────
+
+socket.on('close_question_editor', () => {
+    showSection('waiting');
+    showPlayerWaitMsg('방장이 질문을 취소했습니다. 잠시 기다려주세요...');
+});
+
+// ── 라운드 시작 (선택 단계) ──────────────────────────────
+
+socket.on('round_started', (data) => {
+    gameState.phase   = 'selecting';
+    gameState.myAnswer = null;
+    gameState.correctAnswer = null;
+    // options만 있음 (question은 host_judging 때 공개)
+    gameState.question = { options: data.options };
+
+    phaseInfoEl.textContent = '선택 중';
+    showSection('selecting');
+    questionTextEl.textContent = myRole === 'host' ? '플레이어들이 선택 중...' : '???';
+    renderOptions(data.options, optionsAreaEl, myRole !== 'player');
+    startTimer(10);
+    updatePlayerList();
+});
+
+// ── 모두 답변 완료 → 방장 판정 ──────────────────────────
+
+socket.on('all_answered', () => {
+    gameState.phase = 'host_judging';
+    stopTimer();
+    phaseInfoEl.textContent = myRole === 'host' ? '정답을 선택하세요' : '방장이 정답 선택 중...';
+
+    if (myRole === 'host') {
+        showSection('host_judging');
+        judgeQuestionText.textContent = gameState.question?.question || '';
+        renderOptions(gameState.question?.options || [], judgeOptionsArea, false, true);
+    } else {
+        showSection('selecting');
+        questionTextEl.textContent = gameState.question?.question || '???';
+        disableOptions(optionsAreaEl);
+    }
+    updatePlayerList();
+});
+
+// ── 결과 공개 ────────────────────────────────────────────
+
+socket.on('result_revealed', (data) => {
+    gameState.phase         = 'result';
+    gameState.correctAnswer = data.correctAnswer;
+    stopTimer();
+    phaseInfoEl.textContent = '결과 발표';
+    showSection('result');
+
+    resultQuestionText.textContent = gameState.question?.question || '';
+    renderResultOptions(gameState.question?.options || [], data.correctAnswer);
+
+    eliminatedList.innerHTML = '';
+    if (data.eliminated.length > 0) {
+        const title = document.createElement('p');
+        title.className = 'eliminated-title';
+        title.textContent = `💀 탈락: ${data.eliminated.map(p => p.name).join(', ')}`;
+        eliminatedList.appendChild(title);
+    } else {
+        const title = document.createElement('p');
+        title.className = 'eliminated-title success';
+        title.textContent = '🎉 모두 정답!';
+        eliminatedList.appendChild(title);
+    }
+
+    if (myRole === 'host') hostNextControls.style.display = 'block';
+    updatePlayerList();
+});
+
+// ── 게임 종료 ────────────────────────────────────────────
+
+socket.on('game_finished', (data) => {
+    gameState.phase = 'finished';
+    stopTimer();
+    phaseInfoEl.textContent = '게임 종료';
+    showSection('finished');
 
     if (data.winner) {
-        questionTextEl.textContent = `🎉 우승: ${data.winner.name} 🎉`;
-        showNotification(`🎉 ${data.winner.name}님이 우승했습니다! 🎉`, 'success');
+        winnerDisplay.innerHTML = `<div class="winner-title">🏆 우승자</div><div class="winner-name">${data.winner.name}</div>`;
+        showNotification(`🏆 ${data.winner.name}님 우승!`, 'success');
     } else {
-        questionTextEl.textContent = '게임 종료';
-        showNotification('게임이 종료되었습니다', 'info');
+        winnerDisplay.innerHTML = `<div class="winner-title">게임 종료</div><div class="winner-name">모두 탈락</div>`;
+    }
+
+    // 독대 채팅 패널
+    rightIdle.style.display = 'none';
+    finalChatPanel.style.display = 'flex';
+
+    const isHost   = myRole === 'host';
+    const isWinner = data.winner && gameState.myId === data.winner.id;
+    if (isHost || isWinner) {
+        finalChatInput.style.display = 'flex';
     }
 
     if (myRole === 'host') {
-        startGameBtn.style.display = 'block';
-        nextRoundBtn.style.display = 'none';
+        restartBtn.style.display = 'block';
     }
 
-    updateUI();
+    updatePlayerList();
 });
 
-socket.on('host_left', () => {
-    alert('방장이 나갔습니다. 로비로 돌아갑니다.');
+// ── 방 폭파 / 방장 나감 ──────────────────────────────────
+
+socket.on('room_destroyed', () => {
+    alert('방이 종료되었습니다.');
     window.location.href = '/';
 });
 
-// ── UI 업데이트 ────────────────────────────────────────────
+// ── updateUI ─────────────────────────────────────────────
 
 function updateUI() {
-    // 방장 카드
+    roundInfoEl.textContent = `라운드 ${gameState.round}`;
+    updatePlayerList();
+
+    // phase별 섹션 표시
+    switch (gameState.phase) {
+        case 'waiting':
+            showSection('waiting');
+            phaseInfoEl.textContent = '문제 준비 중';
+            if (myRole === 'host') {
+                showHostWaitControls();
+            } else {
+                showPlayerWaitMsg('방장이 문제를 준비 중입니다...');
+            }
+            // 게임 전이면 시작 버튼
+            if (gameState.round === 1) {
+                preGameArea.style.display = myRole === 'host' ? 'block' : 'none';
+                if (myRole === 'host') hostWaitControls.style.display = 'none';
+            }
+            break;
+        case 'player_making':
+            // player_making_question 이벤트에서 처리
+            break;
+        case 'selecting':
+            showSection('selecting');
+            phaseInfoEl.textContent = '선택 중';
+            break;
+        case 'host_judging':
+            phaseInfoEl.textContent = myRole === 'host' ? '정답을 선택하세요' : '방장이 정답 선택 중...';
+            break;
+        case 'result':
+            phaseInfoEl.textContent = '결과 발표';
+            break;
+        case 'finished':
+            phaseInfoEl.textContent = '게임 종료';
+            break;
+    }
+
+    // 방장 전용 UI
+    if (myRole === 'host') {
+        hostDestroyArea.style.display = 'block';
+    }
+}
+
+function showSection(name) {
+    waitingArea.style.display     = name === 'waiting' ? 'flex' : 'none';
+    questionEditor.style.display  = name === 'editor'  ? 'flex' : 'none';
+    selectingArea.style.display   = name === 'selecting' ? 'flex' : 'none';
+    hostJudgingArea.style.display = name === 'host_judging' ? 'flex' : 'none';
+    resultArea.style.display      = name === 'result'  ? 'flex' : 'none';
+    finishedArea.style.display    = name === 'finished' ? 'flex' : 'none';
+}
+
+function showHostWaitControls() {
+    preGameArea.style.display      = 'none';
+    playerWaitMsg.style.display    = 'none';
+    hostWaitControls.style.display = 'flex';
+    // 취소 버튼 제거
+    const cancelBtn = document.getElementById('cancelPlayerQuestionBtn');
+    if (cancelBtn) cancelBtn.remove();
+}
+
+function showPlayerWaitMsg(msg) {
+    preGameArea.style.display      = 'none';
+    hostWaitControls.style.display = 'none';
+    playerWaitMsg.style.display    = 'block';
+    waitMsgText.textContent        = msg;
+}
+
+// ── 플레이어 목록 ─────────────────────────────────────────
+
+function updatePlayerList() {
     const host = gameState.players.find(p => p.id === gameState.hostId);
     if (host) {
-        let html = `<div class="player-name">👑 ${host.name} (방장)</div>`;
-        if (host.excuse) {
-            const canLike = myRole !== 'spectator' &&
-                (gameState.phase === 'excuse' || gameState.phase === 'chat');
-            html += buildExcuseHtml(host, canLike);
-        }
-        hostCardEl.innerHTML = html;
+        hostCardEl.innerHTML = `<span class="host-crown">👑</span><span class="player-name">${host.name}</span>`;
     }
 
-    // 방장 컨트롤
-    if (myRole === 'host') {
-        hostControlsEl.style.display = 'flex';
-        if (gameState.phase === 'waiting' || gameState.phase === 'finished') {
-            startGameBtn.style.display = 'block';
-            nextRoundBtn.style.display = 'none';
-        } else if (gameState.phase === 'excuse' || gameState.phase === 'chat') {
-            // answer_revealed 이후에만 nextRound 보임 (correctAnswer가 세팅된 경우)
-            startGameBtn.style.display = 'none';
-            nextRoundBtn.style.display = gameState.correctAnswer !== null ? 'block' : 'none';
-        } else {
-            startGameBtn.style.display = 'none';
-            nextRoundBtn.style.display = 'none';
-        }
-    }
-
-    // 플레이어 목록
     playersAreaEl.innerHTML = '';
     gameState.players
         .filter(p => p.id !== gameState.hostId)
-        .forEach(player => playersAreaEl.appendChild(createPlayerCard(player)));
+        .forEach(player => {
+            const card = document.createElement('div');
+            card.className = `player-card ${player.eliminated ? 'eliminated' : ''}`;
+
+            let statusIcon = '';
+            if (player.eliminated) {
+                statusIcon = '<span class="status-icon elim">💀</span>';
+            } else if (gameState.phase === 'selecting' && player.answer !== null) {
+                statusIcon = '<span class="status-icon done">✅</span>';
+            } else if (gameState.phase === 'result' || gameState.phase === 'finished') {
+                if (gameState.correctAnswer !== null) {
+                    statusIcon = player.answer === gameState.correctAnswer
+                        ? '<span class="status-icon correct">⭕</span>'
+                        : '<span class="status-icon wrong">❌</span>';
+                }
+            }
+
+            card.innerHTML = `<span class="player-name">${player.name}</span>${statusIcon}`;
+            playersAreaEl.appendChild(card);
+        });
 }
 
-function buildExcuseHtml(player, canLike) {
-    const likeBtn = canLike
-        ? `<button class="like-button" onclick="likeExcuse('${player.id}')">❤️ <span>${player.likes || 0}</span></button>`
-        : `<span class="like-count-display">❤️ ${player.likes || 0}</span>`;
-    return `<div class="excuse-text"><span class="excuse-body">${player.excuse}</span>${likeBtn}</div>`;
-}
+// ── 선택지 렌더링 ─────────────────────────────────────────
 
-function createPlayerCard(player) {
-    const card = document.createElement('div');
-    card.className = `player-card ${player.eliminated ? 'eliminated' : ''}`;
-    card.id = `player-${player.id}`;
-
-    let html = `<div class="player-name">${player.name}</div>`;
-    html += `<div class="player-info"><div class="player-status">`;
-
-    if (player.role === 'spectator') {
-        html += `<span class="status-badge">관전</span>`;
-    } else if (player.eliminated) {
-        html += `<span class="status-badge">탈락</span>`;
-    } else if (player.answer !== null && gameState.phase === 'selecting') {
-        html += `<span class="status-badge answered">답변 완료</span>`;
-    }
-    html += `</div></div>`;
-
-    if (player.excuse) {
-        const canLike = myRole !== 'spectator' &&
-            (gameState.phase === 'excuse' || gameState.phase === 'chat') &&
-            !player.eliminated;
-        html += buildExcuseHtml(player, canLike);
-    }
-
-    // 방장 전용 액션 버튼: 변명/채팅 단계, 미탈락, 미구제 오답자만
-    if (myRole === 'host' &&
-        (gameState.phase === 'excuse' || gameState.phase === 'chat') &&
-        !player.eliminated &&
-        !player.rescued &&
-        player.role === 'player' &&
-        player.answer !== null) {
-        // 정답자에게는 버튼 표시 안 함 (정답자는 rescue 불필요)
-        // correctAnswer가 아직 null이면 (변명 단계 시작 직후) 오답자 모두 표시
-        const isCorrect = gameState.correctAnswer !== null && player.answer === gameState.correctAnswer;
-        if (!isCorrect) {
-            html += `
-                <div class="player-actions" id="actions-${player.id}">
-                    <button class="btn-chat" onclick="startChat('${player.id}')">대화하기</button>
-                    <button class="btn-eliminate" onclick="eliminatePlayer('${player.id}')">즉시 탈락</button>
-                </div>`;
-        }
-    }
-
-    card.innerHTML = html;
-    return card;
-}
-
-// ── 선택지 렌더링 ──────────────────────────────────────────
-
-function renderOptions(options) {
-    optionsAreaEl.innerHTML = '';
-    options.forEach((option, index) => {
+function renderOptions(options, container, disabled = false, isJudge = false) {
+    container.innerHTML = '';
+    options.forEach((opt, i) => {
         const btn = document.createElement('button');
-        btn.className    = 'option-button';
-        btn.textContent  = `${index + 1}. ${option}`;
-        btn.dataset.index = index;
+        btn.className   = 'option-button';
+        btn.textContent = `${['①','②','③','④'][i]} ${opt}`;
+        btn.disabled    = disabled;
 
-        if (myRole === 'host' || myRole === 'spectator') btn.disabled = true;
-        if (gameState.myAnswer !== null) {
-            btn.disabled = true;
-            if (gameState.myAnswer === index) btn.classList.add('selected');
+        if (!disabled) {
+            if (isJudge) {
+                btn.addEventListener('click', () => {
+                    socket.emit('select_correct_answer', { roomId, answerIndex: i });
+                    Array.from(container.children).forEach(b => b.disabled = true);
+                    btn.classList.add('selected');
+                });
+            } else {
+                if (gameState.myAnswer !== null) {
+                    btn.disabled = true;
+                    if (gameState.myAnswer === i) btn.classList.add('selected');
+                } else {
+                    btn.addEventListener('click', () => selectOption(i));
+                }
+            }
         }
-
-        btn.addEventListener('click', () => selectOption(index));
-        optionsAreaEl.appendChild(btn);
+        container.appendChild(btn);
     });
 }
 
-function enableOptionsForHost() {
-    optionsAreaEl.querySelectorAll('.option-button').forEach(btn => {
-        btn.disabled = false;
-        btn.classList.remove('selected');
+function renderResultOptions(options, correctIndex) {
+    resultOptionsArea.innerHTML = '';
+    options.forEach((opt, i) => {
+        const btn = document.createElement('button');
+        btn.className   = 'option-button';
+        btn.textContent = `${['①','②','③','④'][i]} ${opt}`;
+        btn.disabled    = true;
+        if (i === correctIndex) btn.classList.add('correct');
+        else if (gameState.myAnswer === i) btn.classList.add('wrong-pick');
+        resultOptionsArea.appendChild(btn);
     });
+}
+
+function disableOptions(container) {
+    container.querySelectorAll('.option-button').forEach(b => b.disabled = true);
 }
 
 function selectOption(index) {
     if (myRole !== 'player' || gameState.myAnswer !== null || gameState.phase !== 'selecting') return;
-
     gameState.myAnswer = index;
     socket.emit('submit_answer', { roomId, answerIndex: index });
 
@@ -328,153 +460,7 @@ function selectOption(index) {
     });
 }
 
-function disableOptions() {
-    optionsAreaEl.querySelectorAll('.option-button').forEach(btn => btn.disabled = true);
-}
-
-function highlightCorrectAnswer(correctIndex) {
-    const btns = optionsAreaEl.querySelectorAll('.option-button');
-    if (btns[correctIndex]) btns[correctIndex].classList.add('correct');
-}
-
-// ── 방장 정답 선택 클릭 처리 ──────────────────────────────
-
-optionsAreaEl.addEventListener('click', (e) => {
-    if (myRole !== 'host' || gameState.phase !== 'question_reveal') return;
-    if (!e.target.classList.contains('option-button')) return;
-
-    const buttons = Array.from(optionsAreaEl.querySelectorAll('.option-button'));
-    const index   = buttons.indexOf(e.target);
-    if (index !== -1) socket.emit('select_correct_answer', { roomId, answerIndex: index });
-});
-
-// ── 변명 입력창 ────────────────────────────────────────────
-
-function showExcuseInput() {
-    excuseAreaEl.innerHTML = '';
-    excuseAreaEl.style.display = 'flex';
-
-    const input    = document.createElement('input');
-    input.type     = 'text';
-    input.className= 'excuse-input';
-    input.placeholder = '변명을 입력하세요 (20자 이내)';
-    input.maxLength   = 20;
-
-    const btn     = document.createElement('button');
-    btn.textContent   = '제출';
-    btn.className     = 'excuse-submit-btn';
-
-    const doSubmit = () => {
-        const val = input.value.trim();
-        if (!val) return;
-        socket.emit('submit_excuse', { roomId, excuse: val });
-        excuseAreaEl.innerHTML     = `<div class="excuse-submitted">변명 제출: "${val}"</div>`;
-        excuseAreaEl.style.display = 'block';
-    };
-
-    input.addEventListener('keypress', (e) => { if (e.key === 'Enter') doSubmit(); });
-    btn.addEventListener('click', doSubmit);
-
-    excuseAreaEl.appendChild(input);
-    excuseAreaEl.appendChild(btn);
-    input.focus();
-}
-
-// ── 채팅 패널 ──────────────────────────────────────────────
-
-function showChatPanel(playerId, playerName) {
-    // 선택지 정보 가져오기
-    const player     = gameState.players.find(p => p.id === playerId);
-    const answerIdx  = player ? player.answer : null;
-    const optionText = (answerIdx !== null && gameState.currentOptions[answerIdx])
-        ? `${answerIdx + 1}. ${gameState.currentOptions[answerIdx]}`
-        : '(없음)';
-
-    chatPlayerNameEl.innerHTML =
-        `<strong>${playerName}</strong>님과 대화 중<br>
-         <span class="chat-player-choice">🎯 선택: ${optionText}</span>`;
-
-    // 채팅 기록 복원
-    chatMessagesEl.innerHTML = '';
-    const history = chatHistory.get(playerId) || [];
-    history.forEach(msg => appendChatMessage(msg));
-
-    if (myRole === 'host' || gameState.myId === playerId) {
-        chatInputAreaEl.style.display = 'flex';
-        if (myRole === 'host') addJudgementButtons(playerId);
-    }
-}
-
-function closeChatPanel() {
-    chatInputAreaEl.style.display = 'none';
-    chatPlayerNameEl.innerHTML    = '';
-    const existing = document.querySelector('.judgement-buttons');
-    if (existing) existing.remove();
-}
-
-function appendChatMessage(data) {
-    const msgEl    = document.createElement('div');
-    msgEl.className= `chat-message ${data.senderId === gameState.myId ? 'mine' : 'other'}`;
-
-    const senderEl = document.createElement('div');
-    senderEl.className  = 'chat-message-sender';
-    senderEl.textContent= data.senderName;
-
-    const textEl   = document.createElement('div');
-    textEl.textContent  = data.message;
-
-    msgEl.appendChild(senderEl);
-    msgEl.appendChild(textEl);
-    chatMessagesEl.appendChild(msgEl);
-    chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
-}
-
-function addJudgementButtons(playerId) {
-    const existing = document.querySelector('.judgement-buttons');
-    if (existing) existing.remove();
-
-    const div = document.createElement('div');
-    div.className = 'judgement-buttons';
-
-    const rescueBtn = document.createElement('button');
-    rescueBtn.textContent = '✅ 구제';
-    rescueBtn.className   = 'btn-rescue';
-    rescueBtn.onclick = () => {
-        socket.emit('judge_player', { roomId, playerId, rescue: true });
-        div.remove();
-    };
-
-    const elimBtn  = document.createElement('button');
-    elimBtn.textContent = '❌ 탈락';
-    elimBtn.className   = 'btn-eliminate';
-    elimBtn.onclick = () => {
-        socket.emit('judge_player', { roomId, playerId, rescue: false });
-        div.remove();
-    };
-
-    div.appendChild(rescueBtn);
-    div.appendChild(elimBtn);
-    document.querySelector('.left-panel').insertBefore(div, chatInputAreaEl);
-}
-
-// ── 기타 액션 ─────────────────────────────────────────────
-
-function likeExcuse(playerId) {
-    if (myRole === 'spectator') return;
-    socket.emit('like_excuse', { roomId, playerId });
-}
-
-function startChat(playerId) {
-    socket.emit('start_chat', { roomId, playerId });
-}
-
-function eliminatePlayer(playerId) {
-    if (confirm('정말 탈락시키시겠습니까?')) {
-        socket.emit('judge_player', { roomId, playerId, rescue: false });
-    }
-}
-
-// ── 타이머 ────────────────────────────────────────────────
+// ── 타이머 ───────────────────────────────────────────────
 
 let timerInterval = null;
 
@@ -490,42 +476,105 @@ function startTimer(seconds) {
 }
 
 function stopTimer() {
-    if (timerInterval) {
-        clearInterval(timerInterval);
-        timerInterval = null;
-    }
+    if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
     timerTextEl.textContent = '';
 }
 
-// ── 알림 ──────────────────────────────────────────────────
+// ── 알림 ─────────────────────────────────────────────────
 
 function showNotification(message, type = 'info') {
-    const n    = document.createElement('div');
-    n.className= `notification ${type}`;
+    const n = document.createElement('div');
+    n.className   = `notification ${type}`;
     n.textContent = message;
     document.body.appendChild(n);
     setTimeout(() => n.remove(), 3000);
 }
 
-// ── 버튼 이벤트 ───────────────────────────────────────────
+// ── 버튼 이벤트 ──────────────────────────────────────────
 
+// 게임 시작 전 대기 → 시작
 startGameBtn.addEventListener('click', () => {
     socket.emit('start_game', { roomId });
 });
 
-nextRoundBtn.addEventListener('click', () => {
-    socket.emit('next_round', { roomId });
+// 문제 소스 버튼들
+btnMakeQuestion.addEventListener('click', () => {
+    socket.emit('host_make_question', { roomId });
+});
+btnRandomQuestion.addEventListener('click', () => {
+    socket.emit('host_random_question', { roomId });
+});
+btnPlayerQuestion.addEventListener('click', () => {
+    socket.emit('host_player_question', { roomId });
 });
 
-sendChatBtn.addEventListener('click', () => {
-    if (myRole === 'spectator') return;
-    const message = chatInputEl.value.trim();
-    if (message) {
-        socket.emit('chat_message', { roomId, message });
-        chatInputEl.value = '';
+// 문제 제출
+submitQuestionBtn.addEventListener('click', () => {
+    const question = editorQuestion.value.trim();
+    const options  = Array.from(editorOptionInputs).map(inp => inp.value.trim());
+
+    if (!question) { showNotification('질문을 입력하세요', 'error'); return; }
+    if (options.some(o => !o)) { showNotification('보기 4개를 모두 입력하세요', 'error'); return; }
+
+    socket.emit('submit_question', { roomId, question, options });
+    showSection('waiting');
+    showPlayerWaitMsg('문제가 제출되었습니다. 잠시 기다려주세요...');
+});
+
+// 편집기 취소 (방장만)
+cancelEditorBtn.addEventListener('click', () => {
+    showSection('waiting');
+    showHostWaitControls();
+});
+
+// 다음 라운드
+nextRoundBtn.addEventListener('click', () => {
+    socket.emit('next_round', { roomId });
+    hostNextControls.style.display = 'none';
+});
+
+// 재시작
+restartBtn.addEventListener('click', () => {
+    socket.emit('start_game', { roomId });
+    finalChatPanel.style.display = 'none';
+    rightIdle.style.display      = 'block';
+    restartBtn.style.display     = 'none';
+});
+
+// 방 폭파
+destroyRoomBtn.addEventListener('click', () => {
+    if (confirm('정말 방을 폭파하시겠습니까? 모든 플레이어가 강제 퇴장됩니다.')) {
+        socket.emit('destroy_room', { roomId });
     }
 });
 
-chatInputEl.addEventListener('keypress', (e) => {
-    if (e.key === 'Enter') sendChatBtn.click();
+// 독대 채팅 전송
+finalChatSendBtn.addEventListener('click', sendFinalChat);
+finalChatInputEl.addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') sendFinalChat();
 });
+
+function sendFinalChat() {
+    const msg = finalChatInputEl.value.trim();
+    if (!msg) return;
+    socket.emit('final_chat', { roomId, message: msg });
+    finalChatInputEl.value = '';
+}
+
+socket.on('final_chat_message', (data) => {
+    const div = document.createElement('div');
+    div.className   = `chat-message ${data.senderId === gameState.myId ? 'mine' : 'other'}`;
+    div.innerHTML   = `<div class="chat-message-sender">${data.senderName}</div><div>${data.message}</div>`;
+    finalChatMessages.appendChild(div);
+    finalChatMessages.scrollTop = finalChatMessages.scrollHeight;
+});
+
+// ── 초기 UI 상태 ─────────────────────────────────────────
+
+// 방에 처음 들어왔을 때 (게임 전 대기)
+if (myRole === 'host') {
+    hostDestroyArea.style.display = 'block';
+    preGameArea.style.display     = 'block';
+    hostWaitControls.style.display = 'none';
+}
+showSection('waiting');

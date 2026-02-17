@@ -3,64 +3,126 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>JotDeRo Quiz - Game</title>
+    <title>무물보 퀴즈</title>
     <link rel="stylesheet" href="/css/style.css">
 </head>
 <body>
     <div class="game-container">
-        <!-- 왼쪽: 1:1 채팅방 (1.5) -->
+
+        <!-- 왼쪽: 플레이어 목록 -->
         <div class="left-panel">
-            <div class="chat-header">
-                <h3>1:1 채팅</h3>
-                <div id="chatPlayerName"></div>
+            <div class="panel-header">
+                <span id="roomCode">방 코드: </span>
+                <span id="roundInfo">라운드 1</span>
             </div>
-            <div class="chat-messages" id="chatMessages"></div>
-            <div class="chat-input-area" id="chatInputArea" style="display: none;">
-                <input type="text" id="chatInput" placeholder="메시지 입력..." maxlength="100">
-                <button id="sendChatBtn">전송</button>
-            </div>
-        </div>
-
-        <!-- 중앙: 방장 + 플레이어 목록 (7) -->
-        <div class="center-panel">
-            <div class="game-header">
-                <h2>JotDeRo Quiz</h2>
-                <div class="room-info">
-                    <span id="roomCode">방 코드: </span>
-                    <span id="roundInfo">라운드: 1</span>
-                    <span id="phaseInfo">대기 중</span>
-                </div>
-            </div>
-
-            <!-- 방장 영역 -->
-            <div class="host-area" id="hostArea">
-                <div class="player-card host-card" id="hostCard">
-                    <div class="player-name">방장</div>
-                </div>
-                <div class="host-controls" id="hostControls" style="display: none;">
-                    <button id="startGameBtn" class="host-btn">게임 시작</button>
-                    <button id="nextRoundBtn" class="host-btn" style="display: none;">다음 라운드</button>
-                </div>
-            </div>
-
-            <!-- 플레이어 목록 -->
+            <div class="host-card" id="hostCard"></div>
             <div class="players-area" id="playersArea"></div>
         </div>
 
-        <!-- 오른쪽: 문제/선택지 (1.5) -->
-        <div class="right-panel">
-            <div class="question-header">
-                <h3>문제</h3>
+        <!-- 중앙: 메인 게임 영역 -->
+        <div class="center-panel">
+            <div class="phase-bar">
+                <span id="phaseInfo">대기 중</span>
+                <span id="timerText"></span>
             </div>
-            <div class="question-area">
-                <div id="questionText" class="question-text">대기 중...</div>
-                <div id="optionsArea" class="options-area"></div>
+
+            <!-- 대기 중 (방장 컨트롤) -->
+            <div id="waitingArea" class="game-section">
+                <div id="hostWaitControls" style="display:none;">
+                    <p class="section-label">문제를 선택하세요</p>
+                    <div class="question-source-btns">
+                        <button class="source-btn" id="btnMakeQuestion">✏️ 직접 만들기</button>
+                        <button class="source-btn" id="btnRandomQuestion">🎲 랜덤 질문</button>
+                        <button class="source-btn" id="btnPlayerQuestion">🙋 플레이어 질문</button>
+                    </div>
+                </div>
+                <div id="playerWaitMsg" style="display:none;">
+                    <p class="wait-msg" id="waitMsgText">방장이 문제를 준비 중입니다...</p>
+                </div>
+                <!-- 게임 시작 버튼 (게임 전 대기) -->
+                <div id="preGameArea" style="display:none;">
+                    <button class="host-btn big" id="startGameBtn">🎮 게임 시작</button>
+                </div>
             </div>
-            <div id="excuseArea" class="excuse-area" style="display: none;"></div>
-            <div class="timer-area">
-                <div id="timerText"></div>
+
+            <!-- 문제 편집기 (방장 또는 지정 플레이어) -->
+            <div id="questionEditor" class="game-section" style="display:none;">
+                <p class="section-label" id="editorLabel">질문을 입력하세요</p>
+                <input type="text" id="editorQuestion" class="editor-input" placeholder="질문을 입력하세요" maxlength="60">
+                <div class="editor-options">
+                    <div class="editor-option-row" data-idx="0">
+                        <span class="option-label">①</span>
+                        <input type="text" class="editor-option-input" placeholder="보기 1" maxlength="20">
+                    </div>
+                    <div class="editor-option-row" data-idx="1">
+                        <span class="option-label">②</span>
+                        <input type="text" class="editor-option-input" placeholder="보기 2" maxlength="20">
+                    </div>
+                    <div class="editor-option-row" data-idx="2">
+                        <span class="option-label">③</span>
+                        <input type="text" class="editor-option-input" placeholder="보기 3" maxlength="20">
+                    </div>
+                    <div class="editor-option-row" data-idx="3">
+                        <span class="option-label">④</span>
+                        <input type="text" class="editor-option-input" placeholder="보기 4" maxlength="20">
+                    </div>
+                </div>
+                <div class="editor-actions">
+                    <button class="host-btn" id="submitQuestionBtn">제출하기</button>
+                    <button class="cancel-btn" id="cancelEditorBtn" style="display:none;">취소</button>
+                </div>
+            </div>
+
+            <!-- 선택 단계 -->
+            <div id="selectingArea" class="game-section" style="display:none;">
+                <p class="question-text" id="questionText">???</p>
+                <div class="options-area" id="optionsArea"></div>
+            </div>
+
+            <!-- 방장 판정 단계 -->
+            <div id="hostJudgingArea" class="game-section" style="display:none;">
+                <p class="section-label">정답을 선택하세요 (방장)</p>
+                <p class="question-text" id="judgeQuestionText"></p>
+                <div class="options-area" id="judgeOptionsArea"></div>
+            </div>
+
+            <!-- 결과 단계 -->
+            <div id="resultArea" class="game-section" style="display:none;">
+                <p class="question-text" id="resultQuestionText"></p>
+                <div class="options-area" id="resultOptionsArea"></div>
+                <div id="eliminatedList" class="eliminated-list"></div>
+                <div id="hostNextControls" style="display:none;">
+                    <button class="host-btn big" id="nextRoundBtn">다음 라운드 →</button>
+                </div>
+            </div>
+
+            <!-- 게임 종료 -->
+            <div id="finishedArea" class="game-section" style="display:none;">
+                <div class="winner-display" id="winnerDisplay"></div>
+                <button class="host-btn big" id="restartBtn" style="display:none;">🔄 다시 시작</button>
             </div>
         </div>
+
+        <!-- 오른쪽: 독대 채팅 (finished) / 문제 만드는 중 안내 -->
+        <div class="right-panel">
+            <div id="rightIdle" class="right-section">
+                <p class="right-hint">게임이 진행되면<br>여기에 정보가 표시됩니다</p>
+            </div>
+            <!-- 독대 채팅 -->
+            <div id="finalChatPanel" class="right-section" style="display:none;">
+                <div class="panel-header">🏆 우승자와 독대</div>
+                <div class="chat-messages" id="finalChatMessages"></div>
+                <div class="chat-input-area" id="finalChatInput" style="display:none;">
+                    <input type="text" id="finalChatInputEl" placeholder="메시지 입력..." maxlength="100">
+                    <button id="finalChatSendBtn">전송</button>
+                </div>
+            </div>
+            <!-- 방장 전용: 방 폭파 버튼 -->
+            <div id="hostDestroyArea" style="display:none; margin-top: auto; padding: 12px;">
+                <button class="destroy-btn" id="destroyRoomBtn">💥 방 폭파</button>
+            </div>
+        </div>
+
     </div>
 
     <script src="/socket.io/socket.io.js"></script>
