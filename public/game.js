@@ -3,6 +3,103 @@ const socket = io();
 const roomId  = localStorage.getItem('roomId');
 const myRole  = localStorage.getItem('role');
 
+// ── Web Audio 사운드 엔진 ─────────────────────────────────
+
+const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+function unlockAudio() {
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    document.removeEventListener('click', unlockAudio);
+}
+document.addEventListener('click', unlockAudio);
+
+// 째깍째깍 (tick) 사운드
+let tickInterval = null;
+function playTick() {
+    const osc  = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.frequency.setValueAtTime(1200, audioCtx.currentTime);
+    gain.gain.setValueAtTime(0.18, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.05);
+    osc.start(audioCtx.currentTime);
+    osc.stop(audioCtx.currentTime + 0.05);
+}
+function startTickSound() {
+    stopTickSound();
+    playTick();
+    tickInterval = setInterval(playTick, 500);
+}
+function stopTickSound() {
+    if (tickInterval) { clearInterval(tickInterval); tickInterval = null; }
+}
+
+// 두구두구 (drum roll) 사운드
+let drumInterval = null;
+let drumSpeed = 500;
+function playDrum() {
+    const buf  = audioCtx.createBuffer(1, audioCtx.sampleRate * 0.08, audioCtx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < data.length; i++) {
+        data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / data.length, 2) * 0.5;
+    }
+    const src  = audioCtx.createBufferSource();
+    const gain = audioCtx.createGain();
+    const filter = audioCtx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.value = 180;
+    src.buffer = buf;
+    src.connect(filter);
+    filter.connect(gain);
+    gain.connect(audioCtx.destination);
+    gain.gain.setValueAtTime(1.2, audioCtx.currentTime);
+    src.start(audioCtx.currentTime);
+}
+function startDrumRoll() {
+    stopDrumRoll();
+    drumSpeed = 500;
+    const tick = () => {
+        playDrum();
+        drumSpeed = Math.max(80, drumSpeed * 0.92);
+        drumInterval = setTimeout(tick, drumSpeed);
+    };
+    tick();
+}
+function stopDrumRoll() {
+    if (drumInterval) { clearTimeout(drumInterval); drumInterval = null; }
+}
+
+// 탈락 효과음
+function playElimSound() {
+    const osc  = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(400, audioCtx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(80, audioCtx.currentTime + 0.4);
+    gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.4);
+    osc.start(audioCtx.currentTime);
+    osc.stop(audioCtx.currentTime + 0.4);
+}
+
+// 정답 효과음
+function playCorrectSound() {
+    [523, 659, 784].forEach((freq, i) => {
+        const osc  = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.frequency.value = freq;
+        gain.gain.setValueAtTime(0.2, audioCtx.currentTime + i * 0.12);
+        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + i * 0.12 + 0.2);
+        osc.start(audioCtx.currentTime + i * 0.12);
+        osc.stop(audioCtx.currentTime + i * 0.12 + 0.2);
+    });
+}
+
 if (!roomId || !myRole) window.location.href = '/';
 
 let gameState = {
@@ -119,6 +216,8 @@ socket.on('game_started', () => {
     gameState.pendingAnswer = null;
     gameState.pendingJudge  = null;
     gameState.question      = null;
+    stopTickSound();
+    stopDrumRoll();
     showSection('waiting');
     phaseInfoEl.textContent = '문제 준비 중';
     if (myRole === 'host') {
@@ -136,6 +235,8 @@ socket.on('round_waiting', (data) => {
     gameState.myAnswer = null;
     gameState.correctAnswer = null;
     gameState.question = null;
+    stopTickSound();
+    stopDrumRoll();
     roundInfoEl.textContent = `라운드 ${data.round}`;
     phaseInfoEl.textContent = '문제 준비 중';
     showSection('waiting');
@@ -217,11 +318,11 @@ socket.on('close_question_editor', () => {
 // ── 라운드 시작 (선택 단계) ──────────────────────────────
 
 socket.on('round_started', (data) => {
-    gameState.phase   = 'selecting';
-    gameState.myAnswer = null;
+    gameState.phase       = 'selecting';
+    gameState.myAnswer    = null;
     gameState.correctAnswer = null;
-    gameState.pendingAnswer = null; // 확정 전 임시 선택
-    gameState.question = { question: data.question, options: data.options };
+    gameState.pendingAnswer = null;
+    gameState.question    = { question: data.question, options: data.options };
 
     phaseInfoEl.textContent = '선택 중';
     showSection('selecting');
@@ -229,6 +330,7 @@ socket.on('round_started', (data) => {
     confirmAnswerArea.style.display = 'none';
     renderOptions(data.options, optionsAreaEl, myRole !== 'player');
     startTimer(10);
+    startTickSound();   // 째깍째깍 시작
     updatePlayerList();
 });
 
@@ -237,8 +339,10 @@ socket.on('round_started', (data) => {
 socket.on('all_answered', (data) => {
     gameState.phase = 'host_judging';
     gameState.question = { question: data.question, options: data.options };
-    gameState.pendingJudge = null; // 확정 전 임시 정답 선택
+    gameState.pendingJudge = null;
     stopTimer();
+    stopTickSound();    // 째깍 멈춤
+    startDrumRoll();    // 두구두구 시작
     phaseInfoEl.textContent = myRole === 'host' ? '정답을 선택하세요' : '방장이 정답 선택 중...';
 
     if (myRole === 'host') {
@@ -246,11 +350,15 @@ socket.on('all_answered', (data) => {
         judgeQuestionText.textContent = data.question || '';
         confirmJudgeArea.style.display = 'none';
         renderOptions(data.options || [], judgeOptionsArea, false, true);
+        // 방장에게도 tally 표시 (judgeOptionsArea 아래)
+        renderTally(data.tally || [], data.options.length, judgeOptionsArea);
     } else {
         showSection('selecting');
         questionTextEl.textContent = data.question || '';
         confirmAnswerArea.style.display = 'none';
         disableOptions(optionsAreaEl);
+        // 플레이어에게 tally 표시
+        renderTally(data.tally || [], data.options.length, optionsAreaEl);
     }
     updatePlayerList();
 });
@@ -261,6 +369,8 @@ socket.on('result_revealed', (data) => {
     gameState.phase         = 'result';
     gameState.correctAnswer = data.correctAnswer;
     stopTimer();
+    stopDrumRoll();     // 두구두구 멈춤
+    playCorrectSound(); // 정답 공개 효과음
     phaseInfoEl.textContent = '결과 발표';
     showSection('result');
 
@@ -268,11 +378,20 @@ socket.on('result_revealed', (data) => {
     renderResultOptions(gameState.question?.options || [], data.correctAnswer);
 
     eliminatedList.innerHTML = '';
+
+    // 생존자 수 표시
+    const survivorEl = document.createElement('p');
+    survivorEl.className = 'survivor-count';
+    survivorEl.textContent = `🛡️ 생존자: ${data.survivorCount}명`;
+    eliminatedList.appendChild(survivorEl);
+
     if (data.eliminated.length > 0) {
         const title = document.createElement('p');
         title.className = 'eliminated-title';
-        title.textContent = `💀 탈락: ${data.eliminated.map(p => p.name).join(', ')}`;
+        title.textContent = `💀 탈락자: ${data.eliminated.map(p => p.name).join(', ')}`;
         eliminatedList.appendChild(title);
+        // 탈락 애니메이션: 플레이어 목록에서 한명씩 낙하
+        animateEliminations(data.eliminated);
     } else {
         const title = document.createElement('p');
         title.className = 'eliminated-title success';
@@ -470,6 +589,64 @@ function renderOptions(options, container, disabled = false, isJudge = false) {
         }
         container.appendChild(btn);
     });
+}
+
+// 보기별 선택 수 표시 (optionsArea 또는 judgeOptionsArea 내 버튼에 추가)
+function renderTally(tally, optionCount, container) {
+    if (!tally || tally.length === 0) return;
+    const total = tally.reduce((a, b) => a + b, 0) || 1;
+    const btns  = container.querySelectorAll('.option-button');
+    btns.forEach((btn, i) => {
+        const count = tally[i] || 0;
+        const pct   = Math.round(count / total * 100);
+        // 이미 있으면 제거
+        const old = btn.querySelector('.tally-bar-wrap');
+        if (old) old.remove();
+
+        const wrap = document.createElement('div');
+        wrap.className = 'tally-bar-wrap';
+        wrap.innerHTML = `
+            <div class="tally-bar-bg">
+                <div class="tally-bar-fill" style="width:${pct}%"></div>
+            </div>
+            <span class="tally-count">${count}명 (${pct}%)</span>`;
+        btn.appendChild(wrap);
+    });
+}
+
+// 탈락 애니메이션: 플레이어 카드를 한 명씩 아래로 낙하
+function animateEliminations(eliminated) {
+    if (!eliminated || eliminated.length === 0) return;
+    let idx = 0;
+
+    function dropNext() {
+        if (idx >= eliminated.length) return;
+        const target = eliminated[idx++];
+
+        // 플레이어 목록에서 해당 카드 찾기
+        const cards = playersAreaEl.querySelectorAll('.player-card');
+        let card = null;
+        cards.forEach(c => {
+            if (c.querySelector('.player-name')?.textContent === target.name) card = c;
+        });
+
+        if (card) {
+            playElimSound();
+            card.classList.add('dropping');
+            // 스크롤해서 보이게
+            card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            setTimeout(() => {
+                card.classList.remove('dropping');
+                card.classList.add('eliminated');
+                setTimeout(dropNext, 400);
+            }, 700);
+        } else {
+            setTimeout(dropNext, 300);
+        }
+    }
+
+    // 0.5초 딜레이 후 시작
+    setTimeout(dropNext, 500);
 }
 
 function renderResultOptions(options, correctIndex) {

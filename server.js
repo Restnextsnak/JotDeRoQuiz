@@ -86,11 +86,18 @@ function checkAllPlayersAnswered(roomId) {
   if (alive.length > 0 && answered === alive.length) {
     clearPhaseTimer(roomId);
     room.phase = 'host_judging';
+
+    // 보기별 선택 수 집계
+    const optionCount = room.currentQuestion.options.length;
+    const tally = Array(optionCount).fill(0);
+    alive.forEach(p => { if (p.answer !== null) tally[p.answer]++; });
+
     broadcastRoomState(roomId);
     io.to(roomId).emit('all_answered', {
       phase: 'host_judging',
       question: room.currentQuestion.question,
       options: room.currentQuestion.options,
+      tally,
     });
     console.log(`All answered in ${roomId}`);
   }
@@ -110,11 +117,18 @@ function forceAnswerTimeout(roomId) {
   });
 
   room.phase = 'host_judging';
+
+  // 보기별 선택 수 집계
+  const optionCountF = room.currentQuestion.options.length;
+  const tallyF = Array(optionCountF).fill(0);
+  getAlivePlayers(room).forEach(p => { if (p.answer !== null) tallyF[p.answer]++; });
+
   broadcastRoomState(roomId);
   io.to(roomId).emit('all_answered', {
     phase: 'host_judging',
     question: room.currentQuestion.question,
     options: room.currentQuestion.options,
+    tally: tallyF,
   });
   console.log(`Answer timeout forced in ${roomId}`);
 }
@@ -318,13 +332,16 @@ io.on('connection', (socket) => {
     });
 
     broadcastRoomState(data.roomId);
+
+    const survivors = getAlivePlayers(room);
     io.to(data.roomId).emit('result_revealed', {
       correctAnswer: data.answerIndex,
       eliminated,
+      survivorCount: survivors.length,
       phase: 'result',
     });
 
-    console.log(`Result in ${data.roomId}: correct=${data.answerIndex}, eliminated=${eliminated.length}`);
+    console.log(`Result in ${data.roomId}: correct=${data.answerIndex}, eliminated=${eliminated.length}, survivors=${survivors.length}`);
   });
 
   // ── 방장: 다음 라운드 ─────────────────────────────────
