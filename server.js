@@ -206,7 +206,13 @@ io.on('connection', (socket) => {
   socket.on('join_room', (data) => {
     const room = rooms.get(data.roomId);
     if (!room) { socket.emit('error', { message: '방을 찾을 수 없습니다.' }); return; }
-    if (room.phase !== 'waiting') { socket.emit('error', { message: '이미 게임이 진행 중입니다.' }); return; }
+    // waiting은 게임 시작 전 대기 단계만 — 그 외(player_making, host_review, selecting 등)는 모두 차단
+    const joinablePhases = ['waiting'];
+    // 단, waiting이라도 이미 게임이 한 번이라도 시작됐으면(round > 1이거나 플레이어가 탈락한 경우) 차단
+    const hasGameStarted = room.currentRound > 1 || Array.from(room.players.values()).some(p => p.eliminated);
+    if (!joinablePhases.includes(room.phase) || hasGameStarted) {
+      socket.emit('error', { message: '이미 게임이 진행 중입니다.' }); return;
+    }
     if (room.players.size >= 30) { socket.emit('error', { message: '방이 가득 찼습니다. (최대 30명)' }); return; }
 
     const role = data.role || 'player';
