@@ -206,6 +206,7 @@ io.on('connection', (socket) => {
   socket.on('join_room', (data) => {
     const room = rooms.get(data.roomId);
     if (!room) { socket.emit('error', { message: '방을 찾을 수 없습니다.' }); return; }
+    if (room.phase !== 'waiting') { socket.emit('error', { message: '이미 게임이 진행 중입니다.' }); return; }
     if (room.players.size >= 30) { socket.emit('error', { message: '방이 가득 찼습니다. (최대 30명)' }); return; }
 
     const role = data.role || 'player';
