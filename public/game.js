@@ -135,11 +135,13 @@ const preGameArea        = document.getElementById('preGameArea');
 const startGameBtn       = document.getElementById('startGameBtn');
 
 // 문제 편집기
-const editorLabel        = document.getElementById('editorLabel');
-const editorQuestion     = document.getElementById('editorQuestion');
-const editorOptionInputs = document.querySelectorAll('.editor-option-input');
-const submitQuestionBtn  = document.getElementById('submitQuestionBtn');
-const cancelEditorBtn    = document.getElementById('cancelEditorBtn');
+const editorLabel         = document.getElementById('editorLabel');
+const editorQuestion      = document.getElementById('editorQuestion');
+const editorOptionInputs  = document.querySelectorAll('.editor-option-input');
+const editorOptionsWrapper = document.getElementById('editorOptionsWrapper');
+const submitQuestionBtn   = document.getElementById('submitQuestionBtn');
+const cancelEditorBtn     = document.getElementById('cancelEditorBtn');
+const btnRandomFill       = document.getElementById('btnRandomFill');
 
 // 선택 단계
 const questionTextEl     = document.getElementById('questionText');
@@ -176,7 +178,6 @@ const destroyRoomBtn     = document.getElementById('destroyRoomBtn');
 
 // 방장 질문 소스 버튼
 const btnMakeQuestion    = document.getElementById('btnMakeQuestion');
-const btnRandomQuestion  = document.getElementById('btnRandomQuestion');
 const btnPlayerQuestion  = document.getElementById('btnPlayerQuestion');
 
 roomCodeEl.textContent = `방 코드: ${roomId}`;
@@ -214,12 +215,22 @@ socket.on('game_started', () => {
     gameState.question      = null;
     stopTickSound();
     stopDrumRoll();
+    // 채팅 패널 정리
+    finalChatPanel.style.display = 'none';
+    finalChatMessages.innerHTML  = '';
+    finalChatInput.style.display = 'none';
+    rightIdle.style.display      = 'block';
+    winnerDisplay.innerHTML      = '';
+    restartBtn.style.display     = 'none';
     showSection('waiting');
-    phaseInfoEl.textContent = '문제 준비 중';
+    phaseInfoEl.textContent = '게임 시작 대기 중';
+    // 재시작: 게임 시작 버튼 다시 표시 (입장 허용 상태)
     if (myRole === 'host') {
-        showHostWaitControls();
+        hostWaitControls.style.display = 'none';
+        playerWaitMsg.style.display    = 'none';
+        preGameArea.style.display      = 'block';
     } else {
-        showPlayerWaitMsg('방장이 문제를 준비 중입니다...');
+        showPlayerWaitMsg('방장이 게임을 시작하기를 기다리는 중...');
     }
 });
 
@@ -294,17 +305,24 @@ socket.on('open_question_editor', (data) => {
     }
 
     if (data.mode === 'host') {
-        editorLabel.textContent = '질문과 보기를 입력하세요 (수정 가능)';
+        editorLabel.textContent = '질문과 보기를 입력하세요';
         cancelEditorBtn.style.display = 'inline-block';
+        btnRandomFill.style.display = 'inline-block';
+        editorOptionsWrapper.style.display = 'flex';
         gameState.editorMode = 'host';
     } else if (data.mode === 'host_review') {
         editorLabel.textContent = '📋 플레이어가 만든 질문 — 수정 후 확정하세요';
         cancelEditorBtn.style.display = 'inline-block';
         cancelEditorBtn.textContent = '❌ 질문 취소';
+        btnRandomFill.style.display = 'none';
+        editorOptionsWrapper.style.display = 'flex';
         gameState.editorMode = 'host_review';
     } else {
-        editorLabel.textContent = '질문과 보기를 자유롭게 입력하세요!';
+        // 플레이어 모드: 질문만 입력
+        editorLabel.textContent = '질문을 자유롭게 입력하세요!';
         cancelEditorBtn.style.display = 'none';
+        btnRandomFill.style.display = 'none';
+        editorOptionsWrapper.style.display = 'none';
         gameState.editorMode = 'player';
     }
     editorQuestion.focus();
@@ -751,33 +769,41 @@ startGameBtn.addEventListener('click', () => {
 btnMakeQuestion.addEventListener('click', () => {
     socket.emit('host_make_question', { roomId });
 });
-btnRandomQuestion.addEventListener('click', () => {
-    socket.emit('host_random_question', { roomId });
-});
 btnPlayerQuestion.addEventListener('click', () => {
     socket.emit('host_player_question', { roomId });
+});
+
+// 편집기 내 랜덤 채우기 버튼
+btnRandomFill.addEventListener('click', () => {
+    socket.emit('host_random_question', { roomId });
 });
 
 // 문제 제출
 submitQuestionBtn.addEventListener('click', () => {
     const question = editorQuestion.value.trim();
-    const options  = Array.from(editorOptionInputs).map(inp => inp.value.trim());
 
     if (!question) { showNotification('질문을 입력하세요', 'error'); return; }
-    if (options.some(o => !o)) { showNotification('보기 4개를 모두 입력하세요', 'error'); return; }
 
     gameState.isEditingQuestion = false;
 
-    if (gameState.editorMode === 'host_review') {
-        // 방장이 플레이어 질문 검토 후 확정
-        socket.emit('confirm_player_question', { roomId, question, options });
-        showSection('waiting');
-        showPlayerWaitMsg('질문을 확정했습니다. 게임을 시작합니다...');
-    } else {
-        // 방장 직접 제출 or 플레이어 제출
-        socket.emit('submit_question', { roomId, question, options });
+    if (gameState.editorMode === 'player') {
+        // 플레이어 모드: 질문만 전송 (보기는 서버/방장이 처리)
+        socket.emit('submit_question', { roomId, question, options: null });
         showSection('waiting');
         showPlayerWaitMsg('문제가 제출되었습니다. 잠시 기다려주세요...');
+    } else {
+        const options = Array.from(editorOptionInputs).map(inp => inp.value.trim());
+        if (options.some(o => !o)) { showNotification('보기 4개를 모두 입력하세요', 'error'); return; }
+
+        if (gameState.editorMode === 'host_review') {
+            socket.emit('confirm_player_question', { roomId, question, options });
+            showSection('waiting');
+            showPlayerWaitMsg('질문을 확정했습니다. 게임을 시작합니다...');
+        } else {
+            socket.emit('submit_question', { roomId, question, options });
+            showSection('waiting');
+            showPlayerWaitMsg('문제가 제출되었습니다. 잠시 기다려주세요...');
+        }
     }
     gameState.editorMode = null;
 });
@@ -817,17 +843,6 @@ nextRoundBtn.addEventListener('click', () => {
 
 // 재시작
 restartBtn.addEventListener('click', () => {
-    // 먼저 UI 초기화 후 서버에 요청
-    finalChatPanel.style.display = 'none';
-    finalChatMessages.innerHTML  = '';
-    finalChatInput.style.display = 'none';
-    rightIdle.style.display      = 'block';
-    restartBtn.style.display     = 'none';
-    winnerDisplay.innerHTML      = '';
-    gameState.myAnswer           = null;
-    gameState.correctAnswer      = null;
-    gameState.pendingAnswer      = null;
-    gameState.pendingJudge       = null;
     socket.emit('start_game', { roomId });
 });
 

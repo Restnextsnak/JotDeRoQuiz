@@ -383,7 +383,58 @@ body {
     line-height: 1.6;
 }
 
+/* ── 플레이어 대기 중 로딩 바 ────────────────────────── */
+.waiting-players-bar {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    margin-top: 18px;
+    opacity: 0.65;
+}
+.waiting-bar-text {
+    font-size: 0.88em;
+    letter-spacing: 0.03em;
+    color: #fff;
+}
+.waiting-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #fff;
+    animation: waitingBounce 1.2s ease-in-out infinite;
+}
+.waiting-dot:nth-child(1) { animation-delay: 0s; }
+.waiting-dot:nth-child(2) { animation-delay: 0.2s; }
+.waiting-dot:nth-child(3) { animation-delay: 0.4s; }
+@keyframes waitingBounce {
+    0%, 80%, 100% { transform: scale(0.6); opacity: 0.35; }
+    40%           { transform: scale(1.15); opacity: 1; }
+}
+
 /* ── 문제 편집기 ──────────────────────────────────────── */
+
+.editor-label-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    max-width: 500px;
+}
+.editor-label-row .section-label { margin: 0; flex: 1; }
+
+.random-fill-btn {
+    padding: 5px 14px;
+    background: rgba(255, 200, 80, 0.15);
+    border: 1.5px solid rgba(255, 200, 80, 0.45);
+    border-radius: 20px;
+    color: #ffd97d;
+    font-size: 0.85em;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.15s;
+}
+.random-fill-btn:hover { background: rgba(255, 200, 80, 0.3); }
 
 .editor-input {
     width: 100%;

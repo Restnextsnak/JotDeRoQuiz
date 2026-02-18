@@ -33,7 +33,6 @@
                     <p class="section-label">문제를 선택하세요</p>
                     <div class="question-source-btns">
                         <button class="source-btn" id="btnMakeQuestion">✏️ 직접 만들기</button>
-                        <button class="source-btn" id="btnRandomQuestion">🎲 랜덤 질문</button>
                         <button class="source-btn" id="btnPlayerQuestion">🙋 플레이어 질문</button>
                     </div>
                 </div>
@@ -43,14 +42,23 @@
                 <!-- 게임 시작 버튼 (게임 전 대기) -->
                 <div id="preGameArea" style="display:none;">
                     <button class="host-btn big" id="startGameBtn">🎮 게임 시작</button>
+                    <div class="waiting-players-bar">
+                        <span class="waiting-dot"></span>
+                        <span class="waiting-dot"></span>
+                        <span class="waiting-dot"></span>
+                        <span class="waiting-bar-text">플레이어 대기 중</span>
+                    </div>
                 </div>
             </div>
 
             <!-- 문제 편집기 (방장 또는 지정 플레이어) -->
             <div id="questionEditor" class="game-section" style="display:none;">
-                <p class="section-label" id="editorLabel">질문을 입력하세요</p>
+                <div class="editor-label-row">
+                    <p class="section-label" id="editorLabel">질문을 입력하세요</p>
+                    <button class="random-fill-btn" id="btnRandomFill" style="display:none;">🎲 랜덤</button>
+                </div>
                 <input type="text" id="editorQuestion" class="editor-input" placeholder="질문을 입력하세요" maxlength="60">
-                <div class="editor-options">
+                <div class="editor-options" id="editorOptionsWrapper">
                     <div class="editor-option-row" data-idx="0">
                         <span class="option-label">①</span>
                         <input type="text" class="editor-option-input" placeholder="보기 1" maxlength="20">

@@ -140,6 +140,7 @@ function startRound(roomId, question, options) {
 
   room.currentQuestion = { question, options, correctAnswer: null };
   room.phase = 'selecting';
+  room.gameStarted = true; // 첫 라운드 시작 시 입장 차단
   room.playerMakingId = null;
   room.pendingQuestion = null;
   room.answers.clear();
@@ -306,13 +307,18 @@ io.on('connection', (socket) => {
     if (!isHost && !isPlayerMaking) return;
 
     const { question, options } = data;
-    if (!question || !options || options.length !== 4) return;
-    if (options.some(o => !o || !o.trim())) return;
+    if (!question) return;
+
+    // 플레이어 모드는 질문만 / 방장 모드는 보기도 검증
+    if (!isPlayerMaking) {
+      if (!options || options.length !== 4) return;
+      if (options.some(o => !o || !o.trim())) return;
+    }
 
     if (isPlayerMaking) {
-      // 플레이어 제출 → 방장에게 검토/수정 에디터 열기
+      // 플레이어 제출 → 질문만 받고 방장에게 보기 포함 에디터 열기
       room.phase = 'host_review';
-      room.pendingQuestion = { question: question.trim(), options: options.map(o => o.trim()) };
+      room.pendingQuestion = { question: question.trim(), options: [] };
       room.playerMakingId = null;
       broadcastRoomState(data.roomId);
 
@@ -320,10 +326,10 @@ io.on('connection', (socket) => {
       io.to(data.roomId).emit('player_submitted_question', {
         playerName: room.players.get(socket.id)?.name || '플레이어',
       });
-      // 방장에게만 수정 가능한 에디터 열기
+      // 방장에게만 수정/보기 작성 에디터 열기 (보기는 빈 상태로 방장이 채움)
       io.to(room.host).emit('open_question_editor', {
         mode: 'host_review',
-        prefill: { question: question.trim(), options: options.map(o => o.trim()) },
+        prefill: { question: question.trim(), options: ['', '', '', ''] },
       });
       console.log(`Player question submitted for review in ${data.roomId}`);
     } else {
@@ -435,7 +441,7 @@ io.on('connection', (socket) => {
     room.currentQuestion = null;
     room.playerMakingId = null;
     room.finalWinner = null;
-    room.gameStarted = true;
+    room.gameStarted = false; // 재참가 허용, 게임 시작 버튼 눌러야 다시 잠김
     room.answers.clear();
     room.usedPresetIds.clear();
     room.players.forEach(p => {
