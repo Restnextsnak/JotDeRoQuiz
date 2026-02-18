@@ -223,8 +223,36 @@ socket.on('game_started', () => {
     winnerDisplay.innerHTML      = '';
     restartBtn.style.display     = 'none';
     showSection('waiting');
+    phaseInfoEl.textContent = '문제 준비 중';
+    // 게임 시작 버튼을 눌렀으므로 바로 문제 선택 UI로 이동
+    if (myRole === 'host') {
+        showHostWaitControls();
+    } else {
+        showPlayerWaitMsg('방장이 문제를 준비 중입니다...');
+    }
+});
+
+// ── 다시 하기 (플레이어 입장 허용 대기) ──────────────────
+
+socket.on('game_restarted', () => {
+    gameState.phase         = 'waiting';
+    gameState.myAnswer      = null;
+    gameState.correctAnswer = null;
+    gameState.pendingAnswer = null;
+    gameState.pendingJudge  = null;
+    gameState.question      = null;
+    stopTickSound();
+    stopDrumRoll();
+    // 채팅 패널 정리
+    finalChatPanel.style.display = 'none';
+    finalChatMessages.innerHTML  = '';
+    finalChatInput.style.display = 'none';
+    rightIdle.style.display      = 'block';
+    winnerDisplay.innerHTML      = '';
+    restartBtn.style.display     = 'none';
+    showSection('waiting');
     phaseInfoEl.textContent = '게임 시작 대기 중';
-    // 재시작: 게임 시작 버튼 다시 표시 (입장 허용 상태)
+    // 방장: 게임 시작 버튼 표시 (입장 허용 상태)
     if (myRole === 'host') {
         hostWaitControls.style.display = 'none';
         playerWaitMsg.style.display    = 'none';
@@ -843,7 +871,7 @@ nextRoundBtn.addEventListener('click', () => {
 
 // 재시작
 restartBtn.addEventListener('click', () => {
-    socket.emit('start_game', { roomId });
+    socket.emit('restart_game', { roomId });
 });
 
 // 방 폭파

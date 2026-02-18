@@ -428,12 +428,11 @@ io.on('connection', (socket) => {
     console.log(`Round ${room.currentRound} waiting in ${data.roomId}`);
   });
 
-  // ── 게임 시작 (첫 라운드 또는 재시작) ───────────────────
-  socket.on('start_game', (data) => {
+  // ── 다시 하기 (게임 종료 후 재설정, 입장 허용) ──────────
+  socket.on('restart_game', (data) => {
     const room = rooms.get(data.roomId);
     if (!room || room.host !== socket.id) return;
-    // waiting(게임 전) 또는 finished(재시작) 상태에서만 허용
-    if (room.phase !== 'waiting' && room.phase !== 'finished') return;
+    if (room.phase !== 'finished') return;
 
     clearPhaseTimer(data.roomId);
     room.currentRound = 1;
@@ -441,7 +440,7 @@ io.on('connection', (socket) => {
     room.currentQuestion = null;
     room.playerMakingId = null;
     room.finalWinner = null;
-    room.gameStarted = false; // 재참가 허용, 게임 시작 버튼 눌러야 다시 잠김
+    room.gameStarted = false; // 입장 허용 상태로 리셋
     room.answers.clear();
     room.usedPresetIds.clear();
     room.players.forEach(p => {
@@ -449,6 +448,18 @@ io.on('connection', (socket) => {
       p.eliminated = false;
       p.score = 0;
     });
+
+    broadcastRoomState(data.roomId);
+    io.to(data.roomId).emit('game_restarted');
+    console.log(`Game restarted (waiting for players) in ${data.roomId}`);
+  });
+
+  // ── 게임 시작 (문제 선택 진입, 입장 차단) ────────────────
+  socket.on('start_game', (data) => {
+    const room = rooms.get(data.roomId);
+    if (!room || room.host !== socket.id) return;
+    // waiting 상태에서만 허용 (gameStarted=false인 대기 중)
+    if (room.phase !== 'waiting') return;
 
     broadcastRoomState(data.roomId);
     io.to(data.roomId).emit('game_started', { round: 1 });
