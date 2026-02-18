@@ -109,6 +109,8 @@ let gameState = {
     correctAnswer: null,  // 결과 단계에서 세팅
     isEditingQuestion: false, // 편집기 열린 상태 (updateUI가 덮어쓰지 않도록)
     editorMode: null,     // 'host' | 'host_review' | 'player'
+    timeAttack: false,    // 타임어택 모드 여부
+    roundStartedAt: null, // 라운드 시작 시각 (타임어택용)
 };
 
 // ── DOM ──────────────────────────────────────────────────
@@ -382,14 +384,23 @@ socket.on('round_started', (data) => {
     gameState.correctAnswer = null;
     gameState.pendingAnswer = null;
     gameState.question    = { question: data.question, options: data.options };
+    gameState.timeAttack  = data.timeAttack || false;
+    gameState.roundStartedAt = Date.now();
 
-    phaseInfoEl.textContent = '선택 중';
+    phaseInfoEl.textContent = data.timeAttack ? '⚡ 타임어택!' : '선택 중';
     showSection('selecting');
+    // 이전 소요시간 표시 제거
+    const oldTime = document.getElementById('myAnswerTimeEl');
+    if (oldTime) oldTime.remove();
     questionTextEl.textContent = myRole === 'host' ? '플레이어들이 선택 중...' : data.question;
     confirmAnswerArea.style.display = 'none';
     renderOptions(data.options, optionsAreaEl, myRole !== 'player');
     startTimer(20);
-    startTickSound();   // 째깍째깍 시작
+    startTickSound();
+
+    if (data.timeAttack) {
+        showTimeAttackPopup();
+    }
     updatePlayerList();
 });
 
@@ -428,8 +439,8 @@ socket.on('result_revealed', (data) => {
     gameState.phase         = 'result';
     gameState.correctAnswer = data.correctAnswer;
     stopTimer();
-    stopDrumRoll();     // 두구두구 멈춤
-    playCorrectSound(); // 정답 공개 효과음
+    stopDrumRoll();
+    playCorrectSound();
     phaseInfoEl.textContent = '결과 발표';
     showSection('result');
 
@@ -438,24 +449,55 @@ socket.on('result_revealed', (data) => {
 
     eliminatedList.innerHTML = '';
 
-    // 생존자 수 표시
-    const survivorEl = document.createElement('p');
-    survivorEl.className = 'survivor-count';
-    survivorEl.textContent = `🛡️ 생존자: ${data.survivorCount}명`;
-    eliminatedList.appendChild(survivorEl);
+    if (data.timeAttack && data.timeResults) {
+        // ── 타임어택 결과 표시 ───────────────────────────
+        const survivorEl = document.createElement('p');
+        survivorEl.className = 'survivor-count';
+        survivorEl.textContent = `🛡️ 생존자: ${data.survivorCount}명`;
+        eliminatedList.appendChild(survivorEl);
 
-    if (data.eliminated.length > 0) {
-        const title = document.createElement('p');
-        title.className = 'eliminated-title';
-        title.textContent = `💀 탈락자: ${data.eliminated.map(p => p.name).join(', ')}`;
-        eliminatedList.appendChild(title);
-        // 탈락 애니메이션: 플레이어 목록에서 한명씩 낙하
-        animateEliminations(data.eliminated);
+        // 시간 순위표
+        const rankWrap = document.createElement('div');
+        rankWrap.className = 'time-rank-wrap';
+        data.timeResults.forEach((p, idx) => {
+            const row = document.createElement('div');
+            const isMine = p.id === gameState.myId;
+            row.className = 'time-rank-row' +
+                (p.eliminated ? ' time-rank-eliminated' : '') +
+                (isMine ? ' time-rank-mine' : '');
+            const timeStr = p.answerTime != null ? (p.answerTime / 1000).toFixed(2) + '초' : '-';
+            const correctMark = p.correct ? '✅' : '❌';
+            const elimMark = p.eliminated ? ' 💀' : '';
+            row.innerHTML = `<span class="time-rank-num">${idx + 1}위</span>` +
+                `<span class="time-rank-name">${p.name}${elimMark}</span>` +
+                `<span class="time-rank-correct">${correctMark}</span>` +
+                `<span class="time-rank-time">${timeStr}</span>`;
+            rankWrap.appendChild(row);
+        });
+        eliminatedList.appendChild(rankWrap);
+
+        if (data.eliminated.length > 0) {
+            animateEliminations(data.eliminated);
+        }
     } else {
-        const title = document.createElement('p');
-        title.className = 'eliminated-title success';
-        title.textContent = '🎉 모두 정답!';
-        eliminatedList.appendChild(title);
+        // ── 일반 결과 표시 ───────────────────────────────
+        const survivorEl = document.createElement('p');
+        survivorEl.className = 'survivor-count';
+        survivorEl.textContent = `🛡️ 생존자: ${data.survivorCount}명`;
+        eliminatedList.appendChild(survivorEl);
+
+        if (data.eliminated.length > 0) {
+            const title = document.createElement('p');
+            title.className = 'eliminated-title';
+            title.textContent = `💀 탈락자: ${data.eliminated.map(p => p.name).join(', ')}`;
+            eliminatedList.appendChild(title);
+            animateEliminations(data.eliminated);
+        } else {
+            const title = document.createElement('p');
+            title.className = 'eliminated-title success';
+            title.textContent = '🎉 모두 정답!';
+            eliminatedList.appendChild(title);
+        }
     }
 
     if (myRole === 'host') hostNextControls.style.display = 'block';
@@ -754,6 +796,12 @@ function confirmAnswer() {
         if (i === index) btn.classList.add('selected');
     });
     confirmAnswerArea.style.display = 'none';
+
+    // 타임어택: 본인 소요시간 표시
+    if (gameState.timeAttack && gameState.roundStartedAt) {
+        const elapsed = Date.now() - gameState.roundStartedAt;
+        showMyAnswerTime(elapsed);
+    }
 }
 
 // ── 타이머 ───────────────────────────────────────────────
@@ -784,6 +832,43 @@ function showNotification(message, type = 'info') {
     n.textContent = message;
     document.body.appendChild(n);
     setTimeout(() => n.remove(), 3000);
+}
+
+// ── 타임어택 팝업 ─────────────────────────────────────────
+
+function showTimeAttackPopup() {
+    const old = document.getElementById('timeAttackPopup');
+    if (old) old.remove();
+
+    const popup = document.createElement('div');
+    popup.id = 'timeAttackPopup';
+    popup.className = 'time-attack-popup';
+    popup.innerHTML = `
+        <div class="ta-popup-inner">
+            <div class="ta-popup-icon">⚡</div>
+            <div class="ta-popup-title">타임어택 모드!</div>
+            <div class="ta-popup-desc">정답을 맞혀도 가장 늦게 답한 1명이 탈락합니다</div>
+        </div>`;
+    document.body.appendChild(popup);
+    setTimeout(() => popup.classList.add('ta-popup-show'), 10);
+    setTimeout(() => {
+        popup.classList.remove('ta-popup-show');
+        setTimeout(() => popup.remove(), 400);
+    }, 2800);
+}
+
+// ── 타임어택: 본인 소요시간 표시 ────────────────────────
+
+function showMyAnswerTime(ms) {
+    const old = document.getElementById('myAnswerTimeEl');
+    if (old) old.remove();
+
+    const el = document.createElement('div');
+    el.id = 'myAnswerTimeEl';
+    el.className = 'my-answer-time';
+    el.textContent = `⚡ 내 응답 시간: ${(ms / 1000).toFixed(2)}초`;
+    // confirmAnswerArea 아래 selectingArea에 추가
+    selectingArea.appendChild(el);
 }
 
 // ── 버튼 이벤트 ──────────────────────────────────────────

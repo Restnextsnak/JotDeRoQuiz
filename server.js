@@ -77,6 +77,10 @@ function getAlivePlayers(room) {
   );
 }
 
+function isTimeAttackMode(room) {
+  return room.currentRound > 3 && getAlivePlayers(room).length <= 4;
+}
+
 function checkAllPlayersAnswered(roomId) {
   const room = rooms.get(roomId);
   if (!room || room.phase !== 'selecting') return;
@@ -99,6 +103,7 @@ function checkAllPlayersAnswered(roomId) {
       question: room.currentQuestion.question,
       options: room.currentQuestion.options,
       tally,
+      timeAttack: room.timeAttack || false,
     });
     console.log(`All answered in ${roomId}`);
   }
@@ -114,6 +119,7 @@ function forceAnswerTimeout(roomId) {
       const random = Math.floor(Math.random() * optionCount);
       player.answer = random;
       room.answers.set(id, random);
+      if (room.timeAttack) player.answerTime = 20000; // 시간 초과 = 최대값
     }
   });
 
@@ -130,6 +136,7 @@ function forceAnswerTimeout(roomId) {
     question: room.currentQuestion.question,
     options: room.currentQuestion.options,
     tally: tallyF,
+    timeAttack: room.timeAttack || false,
   });
   console.log(`Answer timeout forced in ${roomId}`);
 }
@@ -138,13 +145,16 @@ function startRound(roomId, question, options) {
   const room = rooms.get(roomId);
   if (!room) return;
 
+  const timeAttack = isTimeAttackMode(room);
   room.currentQuestion = { question, options, correctAnswer: null };
   room.phase = 'selecting';
   room.gameStarted = true; // 첫 라운드 시작 시 입장 차단
+  room.timeAttack = timeAttack;
+  room.roundStartedAt = Date.now(); // 타임어택용 시작 시각
   room.playerMakingId = null;
   room.pendingQuestion = null;
   room.answers.clear();
-  room.players.forEach(p => { p.answer = null; });
+  room.players.forEach(p => { p.answer = null; p.answerTime = null; });
 
   broadcastRoomState(roomId);
   io.to(roomId).emit('round_started', {
@@ -152,6 +162,7 @@ function startRound(roomId, question, options) {
     question: room.currentQuestion.question,
     options: room.currentQuestion.options,
     phase: 'selecting',
+    timeAttack,
   });
 
   setPhaseTimer(roomId, 20000, () => forceAnswerTimeout(roomId));
@@ -362,6 +373,10 @@ io.on('connection', (socket) => {
 
     room.answers.set(socket.id, data.answerIndex);
     player.answer = data.answerIndex;
+    // 타임어택: 답변 소요 시간 기록
+    if (room.timeAttack && room.roundStartedAt) {
+      player.answerTime = Date.now() - room.roundStartedAt;
+    }
 
     broadcastRoomState(data.roomId);
     checkAllPlayersAnswered(data.roomId);
@@ -375,27 +390,81 @@ io.on('connection', (socket) => {
     room.currentQuestion.correctAnswer = data.answerIndex;
     room.phase = 'result';
 
-    // 오답자 탈락 처리
     const eliminated = [];
-    room.players.forEach((player) => {
-      if (player.eliminated || player.role !== 'player') return;
-      if (player.answer !== data.answerIndex) {
-        player.eliminated = true;
-        eliminated.push({ id: player.id, name: player.name });
+
+    if (room.timeAttack) {
+      // ── 타임어택 결과 처리 ──────────────────────────────
+      // 1) 오답자 탈락
+      room.players.forEach((player) => {
+        if (player.eliminated || player.role !== 'player') return;
+        if (player.answer !== data.answerIndex) {
+          player.eliminated = true;
+          eliminated.push({ id: player.id, name: player.name, answerTime: player.answerTime });
+        }
+      });
+
+      const correctSurvivors = getAlivePlayers(room);
+
+      // 2) 정답자 중 가장 빠른 1명만 생존 — 나머지 전원 탈락
+      let slowEliminated = null;
+      if (correctSurvivors.length > 1) {
+        // 빠른 순 정렬, 1위(fastest)만 살리고 나머지 탈락
+        const sorted = correctSurvivors.slice().sort((a, b) => (a.answerTime || 99999) - (b.answerTime || 99999));
+        for (let i = 1; i < sorted.length; i++) {
+          sorted[i].eliminated = true;
+          eliminated.push({ id: sorted[i].id, name: sorted[i].name, answerTime: sorted[i].answerTime });
+        }
+        slowEliminated = eliminated[eliminated.length - 1] || null;
       }
-    });
 
-    broadcastRoomState(data.roomId);
+      // 3) 각 플레이어에게 본인 소요 시간 전송
+      const timeResults = [];
+      room.players.forEach((player) => {
+        if (player.role !== 'player') return;
+        timeResults.push({
+          id: player.id,
+          name: player.name,
+          answerTime: player.answerTime,
+          correct: player.answer === data.answerIndex,
+          eliminated: player.eliminated,
+        });
+      });
+      // 시간순 정렬
+      timeResults.sort((a, b) => (a.answerTime || 99999) - (b.answerTime || 99999));
 
-    const survivors = getAlivePlayers(room);
-    io.to(data.roomId).emit('result_revealed', {
-      correctAnswer: data.answerIndex,
-      eliminated,
-      survivorCount: survivors.length,
-      phase: 'result',
-    });
+      broadcastRoomState(data.roomId);
+      const survivors = getAlivePlayers(room);
+      io.to(data.roomId).emit('result_revealed', {
+        correctAnswer: data.answerIndex,
+        eliminated,
+        survivorCount: survivors.length,
+        phase: 'result',
+        timeAttack: true,
+        timeResults,
+        slowEliminated,
+      });
+    } else {
+      // ── 일반 결과 처리 ──────────────────────────────────
+      room.players.forEach((player) => {
+        if (player.eliminated || player.role !== 'player') return;
+        if (player.answer !== data.answerIndex) {
+          player.eliminated = true;
+          eliminated.push({ id: player.id, name: player.name });
+        }
+      });
 
-    console.log(`Result in ${data.roomId}: correct=${data.answerIndex}, eliminated=${eliminated.length}, survivors=${survivors.length}`);
+      broadcastRoomState(data.roomId);
+      const survivors = getAlivePlayers(room);
+      io.to(data.roomId).emit('result_revealed', {
+        correctAnswer: data.answerIndex,
+        eliminated,
+        survivorCount: survivors.length,
+        phase: 'result',
+        timeAttack: false,
+      });
+    }
+
+    console.log(`Result in ${data.roomId}: correct=${data.answerIndex}, eliminated=${eliminated.length}, survivors=${getAlivePlayers(room).length}`);
   });
 
   // ── 방장: 다음 라운드 ─────────────────────────────────
